@@ -136,14 +136,17 @@ Let's start by getting an idea of what we're working with:
 ```elixir
 cats = "PetImages/Cat/*.jpg"
 birds = "CUB_200_2011/images/*/*.jpg"
+
 num_cats =
   cats
   |> Path.wildcard()
   |> Enum.count()
+
 num_birds =
   birds
   |> Path.wildcard()
   |> Enum.count()
+
 IO.write("Number of cats: #{num_cats}, Number of birds: #{num_birds}")
 ```
 
@@ -177,7 +180,9 @@ Additionally, our images are encoded as PNGs and JPEGs. Axon only works with ten
   |> Path.wildcard()
   |> Enum.random()
   |> Pixels.read_file()
+
 %{data: data, height: height, width: width} = image
+
 data
 |> Nx.from_binary({:u, 8})
 |> Nx.reshape({4, height, width}, names: [:channels, :height, :width])
@@ -207,6 +212,7 @@ cats_path_and_label =
   cats
   |> Path.wildcard()
   |> Enum.map(&{&1, 0})
+
 birds_path_and_label =
   birds
   |> Path.wildcard()
@@ -218,10 +224,12 @@ image_path_and_label = cats_path_and_label ++ birds_path_and_label
 num_examples = Enum.count(image_path_and_label)
 num_train = floor(0.8 * num_examples)
 num_val = floor(0.2 * num_train)
+
 {train, test} =
   image_path_and_label
   |> Enum.shuffle()
   |> Enum.split(num_train)
+
 {val, train} =
   train
   |> Enum.split(num_val)
@@ -252,11 +260,14 @@ In this example, we'll batch images into batches of 32. The choice of batch size
 max_height = 32
 max_width = 32
 batch_size = 32
+
 resize_dimension = fn tensor, dim, limit ->
   axis_size = Nx.axis_size(tensor, dim)
+
   cond do
     axis_size == limit ->
       tensor
+
     axis_size < limit ->
       pad_val = 0
       pad_top = :rand.uniform(limit - axis_size)
@@ -264,18 +275,21 @@ resize_dimension = fn tensor, dim, limit ->
       rank = Nx.rank(tensor) - 1
       pads = for i <- 0..rank, do: if(i == dim, do: {0, 0, 0}, else: {pad_top, pad_bottom, 0})
       Nx.pad(tensor, pad_val, pads)
+
     :otherwise ->
       slice_start = :rand.uniform(axis_size - limit)
       slice_length = limit
       Nx.slice_axis(tensor, slice_start, slice_length, dim)
   end
 end
+
 resize_and_rescale = fn image ->
   image
   |> resize_dimension.(:height, max_height)
   |> resize_dimension.(:width, max_width)
   |> Nx.divide(255.0)
 end
+
 pipeline = fn paths ->
   paths
   |> Flow.from_enumerable()
@@ -283,12 +297,15 @@ pipeline = fn paths ->
     case Pixels.read_file(path) do
       {:error, _} ->
         [:error]
+
       {:ok, image} ->
         %{data: data, height: height, width: width} = image
+
         tensor =
           data
           |> Nx.from_binary({:u, 8})
           |> Nx.reshape({4, height, width}, names: [:channels, :height, :width])
+
         [{tensor, label}]
     end
   end)
