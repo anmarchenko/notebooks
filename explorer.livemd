@@ -1,0 +1,46 @@
+# Exploring Explorer
+
+```elixir
+Mix.install([
+  {:req, "~> 0.4.4"},
+  {:explorer, "~> 0.7.1"},
+  {:kino_explorer, "~> 0.1.11"}
+])
+```
+
+## Baseball
+
+```elixir
+resp =
+  Req.get!(
+    "https://raw.githubusercontent.com/westbaystars/first-pitch-homeruns/main/balls-in-play-2022.tsv"
+  )
+```
+
+```elixir
+require Explorer.DataFrame, as: DF
+```
+
+```elixir
+baseball = DF.load_csv!(resp.body, delimiter: "\t")
+```
+
+<!-- livebook:{"attrs":{"assign_to":"grouped","collect":true,"data_frame":"baseball","data_frame_alias":"Elixir.DF","is_data_frame":true,"lazy":true,"missing_require":null,"operations":[{"active":true,"column":"Pitches","data_options":{"Date":"string","Game":"integer","Pitch":"string","Pitches":"integer","Player":"string","Result":"string","ResultType":"string","Team":"string","Velocity":"string","選手":"string"},"datalist":[],"filter":"equal","message":null,"operation_type":"filters","type":"integer","value":"1"},{"active":true,"column":"Result","data_options":{"Date":"string","Game":"integer","Pitch":"string","Pitches":"integer","Player":"string","Result":"string","ResultType":"string","Team":"string","Velocity":"string","選手":"string"},"datalist":["double","single","home-run","triple"],"filter":"equal","message":null,"operation_type":"filters","type":"string","value":"home-run"},{"active":true,"columns":["Player","Team"],"data_options":{"Date":"string","Game":"integer","Pitch":"string","Pitches":"integer","Player":"string","Result":"string","ResultType":"string","Team":"string","Velocity":"string","選手":"string"},"operation_type":"group_by"},{"active":true,"columns":["Result"],"data_options":{"Date":"string","Game":"integer","Pitch":"string","Pitches":"integer","Player":"string","Result":"string","ResultType":"string","Team":"string","Velocity":"string","選手":"string"},"operation_type":"summarise","query":"count"},{"active":true,"data_options":{"Player":"string","Result_count":"integer","Team":"string"},"direction":"desc","operation_type":"sorting","sort_by":"Result_count"}]},"chunks":null,"kind":"Elixir.KinoExplorer.DataTransformCell","livebook_object":"smart_cell"} -->
+
+```elixir
+grouped =
+  baseball
+  |> DF.lazy()
+  |> DF.filter(col("Pitches") == 1 and col("Result") == "home-run")
+  |> DF.group_by(["Player", "Team"])
+  |> DF.summarise(Result_count: count(col("Result")))
+  |> DF.arrange(desc: col("Result_count"))
+  |> DF.collect()
+```
+
+```elixir
+grouped
+|> DF.rename(Result_count: "HR")
+|> DF.arrange(desc: col("HR"))
+|> DF.head(10)
+```
