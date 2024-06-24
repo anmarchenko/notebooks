@@ -25,17 +25,20 @@ require Explorer.DataFrame, as: DF
 baseball = DF.load_csv!(resp.body, delimiter: "\t")
 ```
 
-<!-- livebook:{"attrs":{"assign_to":"grouped","collect":true,"data_frame":"baseball","data_frame_alias":"Elixir.DF","is_data_frame":true,"lazy":true,"missing_require":null,"operations":[{"active":true,"column":"Pitches","data_options":{"Date":"string","Game":"integer","Pitch":"string","Pitches":"integer","Player":"string","Result":"string","ResultType":"string","Team":"string","Velocity":"string","選手":"string"},"datalist":[],"filter":"equal","message":null,"operation_type":"filters","type":"integer","value":"1"},{"active":true,"column":"Result","data_options":{"Date":"string","Game":"integer","Pitch":"string","Pitches":"integer","Player":"string","Result":"string","ResultType":"string","Team":"string","Velocity":"string","選手":"string"},"datalist":["double","single","home-run","triple"],"filter":"equal","message":null,"operation_type":"filters","type":"string","value":"home-run"},{"active":true,"columns":["Player","Team"],"data_options":{"Date":"string","Game":"integer","Pitch":"string","Pitches":"integer","Player":"string","Result":"string","ResultType":"string","Team":"string","Velocity":"string","選手":"string"},"operation_type":"group_by"},{"active":true,"columns":["Result"],"data_options":{"Date":"string","Game":"integer","Pitch":"string","Pitches":"integer","Player":"string","Result":"string","ResultType":"string","Team":"string","Velocity":"string","選手":"string"},"operation_type":"summarise","query":"count"},{"active":true,"data_options":{"Player":"string","Result_count":"integer","Team":"string"},"direction":"desc","operation_type":"sorting","sort_by":"Result_count"}]},"chunks":null,"kind":"Elixir.KinoExplorer.DataTransformCell","livebook_object":"smart_cell"} -->
+<!-- livebook:{"attrs":"eyJhc3NpZ25fdG8iOiJncm91cGVkIiwiY29sbGVjdCI6dHJ1ZSwiZGF0YV9mcmFtZSI6ImJhc2ViYWxsIiwiZGF0YV9mcmFtZV9hbGlhcyI6IkVsaXhpci5FeHBsb3Jlci5EYXRhRnJhbWUiLCJpc19kYXRhX2ZyYW1lIjpudWxsLCJtaXNzaW5nX3JlcXVpcmUiOiJFbGl4aXIuRXhwbG9yZXIuRGF0YUZyYW1lIiwib3BlcmF0aW9ucyI6W3siYWN0aXZlIjp0cnVlLCJjb2x1bW4iOiJQaXRjaGVzIiwiZGF0YV9vcHRpb25zIjp7IkRhdGUiOiJzdHJpbmciLCJHYW1lIjoiaW50ZWdlciIsIlBpdGNoIjoic3RyaW5nIiwiUGl0Y2hlcyI6ImludGVnZXIiLCJQbGF5ZXIiOiJzdHJpbmciLCJSZXN1bHQiOiJzdHJpbmciLCJSZXN1bHRUeXBlIjoic3RyaW5nIiwiVGVhbSI6InN0cmluZyIsIlZlbG9jaXR5Ijoic3RyaW5nIiwi6YG45omLIjoic3RyaW5nIn0sImRhdGFsaXN0IjpbXSwiZmlsdGVyIjoiZXF1YWwiLCJtZXNzYWdlIjpudWxsLCJvcGVyYXRpb25fdHlwZSI6ImZpbHRlcnMiLCJ0eXBlIjoiaW50ZWdlciIsInZhbHVlIjoiMSJ9LHsiYWN0aXZlIjp0cnVlLCJjb2x1bW4iOiJSZXN1bHQiLCJkYXRhX29wdGlvbnMiOnsiRGF0ZSI6InN0cmluZyIsIkdhbWUiOiJpbnRlZ2VyIiwiUGl0Y2giOiJzdHJpbmciLCJQaXRjaGVzIjoiaW50ZWdlciIsIlBsYXllciI6InN0cmluZyIsIlJlc3VsdCI6InN0cmluZyIsIlJlc3VsdFR5cGUiOiJzdHJpbmciLCJUZWFtIjoic3RyaW5nIiwiVmVsb2NpdHkiOiJzdHJpbmciLCLpgbjmiYsiOiJzdHJpbmcifSwiZGF0YWxpc3QiOlsiZG91YmxlIiwic2luZ2xlIiwiaG9tZS1ydW4iLCJ0cmlwbGUiXSwiZmlsdGVyIjoiZXF1YWwiLCJtZXNzYWdlIjpudWxsLCJvcGVyYXRpb25fdHlwZSI6ImZpbHRlcnMiLCJ0eXBlIjoic3RyaW5nIiwidmFsdWUiOiJob21lLXJ1biJ9LHsiYWN0aXZlIjp0cnVlLCJjb2x1bW5zIjpbIlBsYXllciIsIlRlYW0iXSwiZGF0YV9vcHRpb25zIjp7IkRhdGUiOiJzdHJpbmciLCJHYW1lIjoiaW50ZWdlciIsIlBpdGNoIjoic3RyaW5nIiwiUGl0Y2hlcyI6ImludGVnZXIiLCJQbGF5ZXIiOiJzdHJpbmciLCJSZXN1bHQiOiJzdHJpbmciLCJSZXN1bHRUeXBlIjoic3RyaW5nIiwiVGVhbSI6InN0cmluZyIsIlZlbG9jaXR5Ijoic3RyaW5nIiwi6YG45omLIjoic3RyaW5nIn0sIm9wZXJhdGlvbl90eXBlIjoiZ3JvdXBfYnkifSx7ImFjdGl2ZSI6dHJ1ZSwiY29sdW1ucyI6WyJSZXN1bHQiXSwiZGF0YV9vcHRpb25zIjp7IkRhdGUiOiJzdHJpbmciLCJHYW1lIjoiaW50ZWdlciIsIlBpdGNoIjoic3RyaW5nIiwiUGl0Y2hlcyI6ImludGVnZXIiLCJQbGF5ZXIiOiJzdHJpbmciLCJSZXN1bHQiOiJzdHJpbmciLCJSZXN1bHRUeXBlIjoic3RyaW5nIiwiVGVhbSI6InN0cmluZyIsIlZlbG9jaXR5Ijoic3RyaW5nIiwi6YG45omLIjoic3RyaW5nIn0sIm9wZXJhdGlvbl90eXBlIjoic3VtbWFyaXNlIiwicXVlcnkiOiJjb3VudCJ9LHsiYWN0aXZlIjp0cnVlLCJkYXRhX29wdGlvbnMiOnsiUGxheWVyIjoic3RyaW5nIiwiUmVzdWx0X2NvdW50IjoiaW50ZWdlciIsIlRlYW0iOiJzdHJpbmcifSwiZGlyZWN0aW9uIjoiZGVzYyIsIm9wZXJhdGlvbl90eXBlIjoic29ydGluZyIsInNvcnRfYnkiOiJSZXN1bHRfY291bnQifV19","chunks":null,"kind":"Elixir.KinoExplorer.DataTransformCell","livebook_object":"smart_cell"} -->
 
 ```elixir
+require Explorer.DataFrame
+
 grouped =
   baseball
-  |> DF.lazy()
-  |> DF.filter(col("Pitches") == 1 and col("Result") == "home-run")
-  |> DF.group_by(["Player", "Team"])
-  |> DF.summarise(Result_count: count(col("Result")))
-  |> DF.arrange(desc: col("Result_count"))
-  |> DF.collect()
+  |> Explorer.DataFrame.lazy()
+  |> Explorer.DataFrame.new(lazy: true)
+  |> Explorer.DataFrame.filter(col("Pitches") == 1 and col("Result") == "home-run")
+  |> Explorer.DataFrame.group_by(["Player", "Team"])
+  |> Explorer.DataFrame.summarise(Result_count: count(col("Result")))
+  |> Explorer.DataFrame.arrange(desc: col("Result_count"))
+  |> Explorer.DataFrame.collect()
 ```
 
 ```elixir

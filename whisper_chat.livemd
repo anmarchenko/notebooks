@@ -1,3 +1,5 @@
+<!-- livebook:{"app_settings":{"access_type":"public","output_type":"rich","slug":"whisper-chat"}} -->
+
 # Whisper chat
 
 ```elixir
@@ -31,15 +33,18 @@ serving =
     stream: true,
     defn_options: [compiler: EXLA]
   )
+
+Kino.start_child!({Nx.Serving, serving: serving, name: WhisperChat})
 ```
 
 ```elixir
 audio_input = Kino.Input.audio("Audio", sampling_rate: featurizer.sampling_rate)
-form = Kino.Control.form([audio: audio_input], submit: "Run")
+name_input = Kino.Input.text("Name")
+form = Kino.Control.form([name: name_input, audio: audio_input], submit: "Run")
 frame = Kino.Frame.new()
 
-Kino.listen(form, fn %{data: %{audio: audio}} ->
-  if audio do
+Kino.listen(form, fn %{data: %{audio: audio, name: name}, origin: origin} ->
+  if audio && name != "" do
     audio =
       audio.file_ref
       |> Kino.Input.file_path()
@@ -48,9 +53,7 @@ Kino.listen(form, fn %{data: %{audio: audio}} ->
       |> Nx.reshape({:auto, audio.num_channels})
       |> Nx.mean(axes: [1])
 
-    Kino.Frame.render(frame, Kino.Text.new("(Start of transcription)", chunk: true))
-
-    for chunk <- Nx.Serving.run(serving, audio) do
+    for chunk <- Nx.Serving.batched_run(WhisperChat, audio) do
       [start_mark, end_mark] =
         for seconds <- [chunk.start_timestamp_seconds, chunk.end_timestamp_seconds] do
           seconds |> round() |> Time.from_seconds_after_midnight() |> Time.to_string()
@@ -58,10 +61,12 @@ Kino.listen(form, fn %{data: %{audio: audio}} ->
 
       text = "
 #{start_mark}-#{end_mark}: #{chunk.text}"
-      Kino.Frame.append(frame, Kino.Text.new(text, chunk: true))
+      content = Kino.Markdown.new("**#{name}**: #{text}")
+      Kino.Frame.append(frame, content)
     end
-
-    Kino.Frame.append(frame, Kino.Text.new("\n(End of transcription)", chunk: true))
+  else
+    content = Kino.Markdown.new("*Error! name and audio are required*")
+    Kino.Frame.append(frame, content, to: origin)
   end
 end)
 

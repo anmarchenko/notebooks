@@ -1,0 +1,232 @@
+# IGDB API
+
+```elixir
+Mix.install([
+  {:req, "~> 0.5.0"},
+  {:explorer, "~> 0.8.0"},
+  {:kino_explorer, "~> 0.1.19"},
+  {:jason, "~> 1.4"}
+])
+```
+
+## Description
+
+We use [IGDB](https://www.igdb.com) API as the single source of data about games, platforms, game developers, etc.
+
+### Resources
+
+* [Twitch dev account](https://dev.twitch.tv/console) - client id and client secret here
+* [Docs](https://api-docs.igdb.com/#getting-started)
+* [Dashboard](https://app.datadoghq.eu/dashboard/nyv-k3p-sbv/igdb-api?fromUser=true&refresh_mode=sliding&view=spans&from_ts=1718548165090&to_ts=1719152965090&live=true)
+
+## Auth token
+
+Twitch auth token is required for all subsequent requests.
+
+* [Docs](https://dev.twitch.tv/docs/authentication/getting-tokens-oauth/#client-credentials-grant-flow)
+
+```elixir
+{:ok, %{body: resp}} =
+  Req.post("https://id.twitch.tv/oauth2/token",
+    form: [
+      client_id: System.get_env("LB_TWITCH_CLIENT_ID"),
+      client_secret: System.get_env("LB_TWITCH_CLIENT_SECRET"),
+      grant_type: "client_credentials"
+    ]
+  )
+
+auth_token = resp["access_token"]
+```
+
+```elixir
+base_request =
+  Req.new(
+    base_url: "https://api.igdb.com/v4/",
+    method: :post,
+    headers: %{
+      "Accept" => "application/json",
+      "Client-ID" => System.get_env("LB_TWITCH_CLIENT_ID")
+    },
+    auth: {:bearer, auth_token}
+  )
+```
+
+## Fetch single game
+
+We use this endpoint to render game page in Igroteka. Requires game's ID (integer, defined by IGDB).
+
+* [Docs](https://api-docs.igdb.com/#game)
+
+```elixir
+game_by_id_query = fn id ->
+  """
+    where id = #{id};
+    fields aggregated_rating,aggregated_rating_count,
+    first_release_date,name,summary,url,
+    category,status,
+    storyline,cover.image_id,
+    platforms.id,platforms.name,
+    franchises.id,franchises.name,
+    websites.id,websites.category,websites.url,
+    videos.video_id,
+    videos.name,
+    themes.id,themes.name,
+    genres.id,genres.name,
+    involved_companies.developer,
+    involved_companies.publisher,
+    involved_companies.company.id,
+    involved_companies.company.name,
+    involved_companies.company.url,
+    involved_companies.company.country,
+    involved_companies.company.logo.url;
+  """
+end
+```
+
+```elixir
+fetch_game = fn id ->
+  Req.request!(base_request, url: "/games", body: game_by_id_query.(id)).body
+end
+```
+
+<!-- livebook:{"reevaluate_automatically":true} -->
+
+````elixir
+frame = Kino.Frame.new()
+
+form =
+  Kino.Control.form(
+    [
+      game_id: Kino.Input.text("Game id")
+    ],
+    submit: "Submit"
+  )
+
+Kino.listen(form, fn %{data: %{game_id: game_id}} ->
+  loading = Kino.Markdown.new("Loading #{game_id}...")
+  Kino.Frame.render(frame, loading)
+
+  [resp] = fetch_game.(game_id)
+
+  content =
+    Kino.Markdown.new("""
+      ### #{resp["name"]} (#{resp["id"]})
+      *[IGDB](#{resp["url"]}) | [Igroteka](https://igroteka.cc/games/#{resp["id"]}/info)*
+
+      **Release date:** #{DateTime.from_unix!(resp["first_release_date"])}
+
+      **IGDB rating:** #{resp["aggregated_rating"]} (#{resp["aggregated_rating_count"]})
+
+      **Platforms:** #{Enum.map(resp["platforms"], fn o -> o["name"] end) |> Enum.join(", ")}
+
+      **Genres:** #{Enum.map(resp["genres"], fn o -> o["name"] end) |> Enum.join(", ")}
+
+      **Themes:** #{Enum.map(resp["themes"], fn o -> o["name"] end) |> Enum.join(", ")}
+
+      **Creators:** #{Enum.map(resp["involved_companies"], fn o -> o["company"]["name"] end) |> Enum.join(", ")}
+
+      #### Summary
+      #{resp["summary"]}
+
+      #### Storyline
+      #{resp["storyline"]}
+
+      ### Raw result
+      ```json
+      #{Jason.encode!(resp, pretty: true)}
+      ```
+    """)
+
+  Kino.Frame.render(frame, content)
+end)
+
+Kino.Layout.grid([form, frame], boxed: true, gap: 16)
+````
+
+Example ids to use:
+
+* 254339 (Super Mario Wonder)
+* 31551 (FF XVI)
+* 119388 (Zelda TOTK)
+* 4 (Thief)
+* 13 (Fallout)
+
+## Search
+
+Provide search term, get list of games in return.
+
+* [Docs](https://api-docs.igdb.com/#search)
+
+```elixir
+search_query = fn term ->
+  """
+    search "#{term}";
+    
+    where game != null & game.first_release_date != null;
+    
+    fields game.aggregated_rating,game.aggregated_rating_count,game.first_release_date,game.name,game.summary,
+    game.url,game.cover.image_id,
+    game.involved_companies.developer,game.involved_companies.publisher,
+    game.involved_companies.company.id,game.involved_companies.company.name,game.involved_companies.company.url,
+    game.involved_companies.company.country, game.platforms.id, game.platforms.name;
+  """
+end
+```
+
+```elixir
+search_games = fn term ->
+  Req.request!(base_request, url: "/search", body: search_query.(term)).body
+end
+```
+
+````elixir
+frame = Kino.Frame.new()
+
+render_game = fn g ->
+  """
+  ---
+  #### #{g["game"]["name"]}
+
+
+  *[IGDB](#{g["game"]["url"]}) | [Igroteka](https://igroteka.cc/games/#{g["game"]["id"]}/info)*
+  """
+end
+
+form =
+  Kino.Control.form(
+    [
+      term: Kino.Input.text("Search term")
+    ],
+    submit: "Submit"
+  )
+
+Kino.listen(form, fn %{data: %{term: term}} ->
+  loading = Kino.Markdown.new("Searching \"#{term}\"...")
+  Kino.Frame.render(frame, loading)
+
+  resp = search_games.(term)
+
+  content =
+    Kino.Markdown.new("""
+      ### Games
+      #{Enum.map(resp,
+    fn game_json -> render_game.(game_json) end) |> Enum.join("\n\n")}
+      ### Raw result
+      ```json
+      #{Jason.encode!(resp, pretty: true)}
+      ```
+    """)
+
+  Kino.Frame.render(frame, content)
+end)
+
+Kino.Layout.grid([form, frame], boxed: true, gap: 16)
+````
+
+## Top games list
+
+e
+
+## New games list
+
+<!-- livebook:{"offset":5507,"stamp":{"token":"XCP.03K5DU7DXov-COg9atlRs1isPxXO5KADbZGF5LYDktpszGiebfvtCcTTYXl-TMUg9JB39IqKWWIlqT9FNSzFq0aNBHVcHLXvXXt8QtRei802mi0XgymA6Qxv_cekggN18qscah5m75BofFb7WNzlDiVhKyw","version":2}} -->
