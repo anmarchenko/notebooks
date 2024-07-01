@@ -55,7 +55,7 @@ base_request =
 
 We use this endpoint to render game page in Igroteka. Requires game's ID (integer, defined by IGDB).
 
-* [Docs](https://api-docs.igdb.com/#game)
+* [Game endpoint docs](https://api-docs.igdb.com/#game)
 
 ```elixir
 game_by_id_query = fn id ->
@@ -155,7 +155,7 @@ Example ids to use:
 
 Provide search term, get list of games in return.
 
-* [Docs](https://api-docs.igdb.com/#search)
+* [Search endpoint docs](https://api-docs.igdb.com/#search)
 
 ```elixir
 search_query = fn term ->
@@ -186,7 +186,6 @@ render_game = fn g ->
   """
   ---
   #### #{g["game"]["name"]}
-
 
   *[IGDB](#{g["game"]["url"]}) | [Igroteka](https://igroteka.cc/games/#{g["game"]["id"]}/info)*
   """
@@ -225,8 +224,148 @@ Kino.Layout.grid([form, frame], boxed: true, gap: 16)
 
 ## Top games list
 
-e
+Populates "Top games" view (filtered by year and/or platform)
+
+* [Games endpoint docs](https://api-docs.igdb.com/#game)
+
+```elixir
+top_games_query =
+  """
+  where first_release_date != null & aggregated_rating != null & aggregated_rating_count > 5 & aggregated_rating > 79 & name != "The Witness";
+  sort aggregated_rating desc;
+  limit 20;
+  fields name,aggregated_rating,aggregated_rating_count,first_release_date,summary,url,cover.image_id,
+  involved_companies.developer,involved_companies.publisher,
+  involved_companies.company.id,involved_companies.company.name,involved_companies.company.url,
+  involved_companies.company.country;
+  """
+```
+
+```elixir
+fetch_top_games = fn ->
+  Req.request!(base_request, url: "/games", body: top_games_query).body
+end
+```
+
+````elixir
+resp = fetch_top_games.()
+
+render_game = fn g ->
+  """
+  ---
+  #### #{g["name"]}
+
+  *[IGDB](#{g["url"]}) | [Igroteka](https://igroteka.cc/games/#{g["id"]}/info)*
+  """
+end
+
+Kino.Markdown.new("""
+  ### Games
+  #{Enum.map(resp,
+fn game_json -> render_game.(game_json) end) |> Enum.join("\n\n")}
+  ```
+""")
+````
 
 ## New games list
 
-<!-- livebook:{"offset":5507,"stamp":{"token":"XCP.03K5DU7DXov-COg9atlRs1isPxXO5KADbZGF5LYDktpszGiebfvtCcTTYXl-TMUg9JB39IqKWWIlqT9FNSzFq0aNBHVcHLXvXXt8QtRei802mi0XgymA6Qxv_cekggN18qscah5m75BofFb7WNzlDiVhKyw","version":2}} -->
+Populates "New games" view
+
+```elixir
+new_games_query =
+  """
+    where first_release_date != null & aggregated_rating != null & aggregated_rating_count > 5 & aggregated_rating > 79;
+    sort first_release_date desc;
+    limit 30;
+    fields name,aggregated_rating,aggregated_rating_count,first_release_date,summary,url,cover.image_id,
+    involved_companies.developer,involved_companies.publisher,
+    involved_companies.company.id,involved_companies.company.name,involved_companies.company.url,
+    involved_companies.company.country;
+  """
+```
+
+```elixir
+fetch_new_games = fn ->
+  Req.request!(base_request, url: "/games", body: new_games_query).body
+end
+```
+
+````elixir
+resp = fetch_new_games.()
+
+render_game = fn g ->
+  """
+  ---
+  #### #{g["name"]}
+
+  *[IGDB](#{g["url"]}) | [Igroteka](https://igroteka.cc/games/#{g["id"]}/info)*
+  """
+end
+
+Kino.Markdown.new("""
+  ### Games
+  #{Enum.map(resp,
+fn game_json -> render_game.(game_json) end) |> Enum.join("\n\n")}
+  ```
+""")
+````
+
+## Company
+
+Fetch single company
+
+* [Docs](https://api-docs.igdb.com/#company)
+
+```elixir
+company_by_id_query = fn id ->
+  """
+    where id = #{id};
+    fields id,name,country,description,logo.*,start_date,url,websites.*;
+  """
+end
+```
+
+```elixir
+fetch_company = fn id ->
+  Req.request!(base_request, url: "/companies", body: company_by_id_query.(id)).body
+end
+```
+
+````elixir
+frame = Kino.Frame.new()
+
+form =
+  Kino.Control.form(
+    [
+      id: Kino.Input.text("Company id")
+    ],
+    submit: "Submit"
+  )
+
+Kino.listen(form, fn %{data: %{id: id}} ->
+  loading = Kino.Markdown.new("Loading #{id}...")
+  Kino.Frame.render(frame, loading)
+
+  [resp] = fetch_company.(id)
+
+  content =
+    Kino.Markdown.new("""
+      ### #{resp["name"]} (#{resp["id"]})
+      *[IGDB](#{resp["url"]}) | [Igroteka](https://igroteka.cc/companies/#{resp["id"]}/developed)*
+
+      #### Description
+      #{resp["description"]}
+
+      ### Raw result
+      ```json
+      #{Jason.encode!(resp, pretty: true)}
+      ```
+    """)
+
+  Kino.Frame.render(frame, content)
+end)
+
+Kino.Layout.grid([form, frame], boxed: true, gap: 16)
+````
+
+<!-- livebook:{"offset":8707,"stamp":{"token":"XCP.ZIWVpZLwH5z8lW051IRPMoT-xm0ihJKWcEDErYJULI7KXIHhXUP9DqCvUxRAb8g2wrqSbgkXVZBoOS9KyEdrLoRcg52NPx98VGpHn56bahpsGKdi3lLJFo6IETlM3Es520FV07cxkH7dawUawKcTTXoHxA4","version":2}} -->
