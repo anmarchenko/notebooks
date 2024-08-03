@@ -1,0 +1,90 @@
+# Geonames
+
+```elixir
+Mix.install([
+  {:req, "~> 0.5.0"},
+  {:explorer, "~> 0.8.0"},
+  {:kino_explorer, "~> 0.1.19"}
+])
+```
+
+## Description
+
+We use Geonames as a source of data for database of cities, regions, and countries in Hamster Travel.
+
+The documentation for available in the [readme.txt](https://download.geonames.org/export/dump/readme.txt).
+
+Interesting bits for this project:
+
+* countryInfo.txt          : country information : iso codes, fips codes, languages, capital ,...
+* XX.zip                   : features for country with iso code XX, see 'geoname' table for columns. 'no-country' for features not belonging to a country.
+* alternateNamesV2.zip     : alternate names with language codes and geonameId: translations here
+
+All downloads are available in [this folder](https://download.geonames.org/export/dump/)
+
+```elixir
+require Explorer.DataFrame, as: DF
+```
+
+## Countries info
+
+File countryInfo.txt
+
+```elixir
+csv =
+  Req.get!("https://download.geonames.org/export/dump/countryInfo.txt").body
+  |> String.split("\n")
+  |> Enum.filter(fn s -> !String.starts_with?(s, "#") || String.starts_with?(s, "#ISO") end)
+  |> Enum.join("\n")
+```
+
+```elixir
+countries =
+  DF.load_csv!(csv, delimiter: "\t")
+  |> DF.rename(%{"#ISO" => "ISO"})
+```
+
+<!-- livebook:{"attrs":"eyJhc3NpZ25fdG8iOm51bGwsImNvbGxlY3QiOnRydWUsImRhdGFfZnJhbWUiOiJjb3VudHJpZXMiLCJkYXRhX2ZyYW1lX2FsaWFzIjoiRWxpeGlyLkRGIiwiaXNfZGF0YV9mcmFtZSI6dHJ1ZSwibWlzc2luZ19yZXF1aXJlIjpudWxsLCJvcGVyYXRpb25zIjpbeyJhY3RpdmUiOnRydWUsImNvbHVtbiI6IlBvcHVsYXRpb24iLCJkYXRhX29wdGlvbnMiOnsiQXJlYShpbiBzcSBrbSkiOiJmbG9hdCIsIkNhcGl0YWwiOiJzdHJpbmciLCJDb250aW5lbnQiOiJzdHJpbmciLCJDb3VudHJ5Ijoic3RyaW5nIiwiQ3VycmVuY3lDb2RlIjoic3RyaW5nIiwiQ3VycmVuY3lOYW1lIjoic3RyaW5nIiwiRXF1aXZhbGVudEZpcHNDb2RlIjoic3RyaW5nIiwiSVNPIjoic3RyaW5nIiwiSVNPLU51bWVyaWMiOiJpbnRlZ2VyIiwiSVNPMyI6InN0cmluZyIsIkxhbmd1YWdlcyI6InN0cmluZyIsIlBob25lIjoic3RyaW5nIiwiUG9wdWxhdGlvbiI6ImludGVnZXIiLCJQb3N0YWwgQ29kZSBGb3JtYXQiOiJzdHJpbmciLCJQb3N0YWwgQ29kZSBSZWdleCI6InN0cmluZyIsImZpcHMiOiJzdHJpbmciLCJnZW9uYW1laWQiOiJpbnRlZ2VyIiwibmVpZ2hib3VycyI6InN0cmluZyIsInRsZCI6InN0cmluZyJ9LCJkYXRhbGlzdCI6W10sImZpbHRlciI6ImdyZWF0ZXIiLCJtZXNzYWdlIjpudWxsLCJvcGVyYXRpb25fdHlwZSI6ImZpbHRlcnMiLCJ0eXBlIjoiaW50ZWdlciIsInZhbHVlIjoiMCJ9LHsiYWN0aXZlIjp0cnVlLCJjb2x1bW5zIjpbIklTTyIsIkNvdW50cnkiLCJnZW9uYW1laWQiLCJDb250aW5lbnQiXSwiZGF0YV9vcHRpb25zIjp7IkFyZWEoaW4gc3Ega20pIjoiZmxvYXQiLCJDYXBpdGFsIjoic3RyaW5nIiwiQ29udGluZW50Ijoic3RyaW5nIiwiQ291bnRyeSI6InN0cmluZyIsIkN1cnJlbmN5Q29kZSI6InN0cmluZyIsIkN1cnJlbmN5TmFtZSI6InN0cmluZyIsIkVxdWl2YWxlbnRGaXBzQ29kZSI6InN0cmluZyIsIklTTyI6InN0cmluZyIsIklTTy1OdW1lcmljIjoiaW50ZWdlciIsIklTTzMiOiJzdHJpbmciLCJMYW5ndWFnZXMiOiJzdHJpbmciLCJQaG9uZSI6InN0cmluZyIsIlBvcHVsYXRpb24iOiJpbnRlZ2VyIiwiUG9zdGFsIENvZGUgRm9ybWF0Ijoic3RyaW5nIiwiUG9zdGFsIENvZGUgUmVnZXgiOiJzdHJpbmciLCJmaXBzIjoic3RyaW5nIiwiZ2VvbmFtZWlkIjoiaW50ZWdlciIsIm5laWdoYm91cnMiOiJzdHJpbmciLCJ0bGQiOiJzdHJpbmcifSwib3BlcmF0aW9uX3R5cGUiOiJzZWxlY3QifV19","chunks":null,"kind":"Elixir.KinoExplorer.DataTransformCell","livebook_object":"smart_cell"} -->
+
+```elixir
+countries
+|> DF.lazy()
+|> DF.filter(col("Population") > 0)
+|> DF.select(["ISO", "Country", "geonameid", "Continent"])
+|> DF.collect()
+```
+
+## Germany
+
+```elixir
+[{_, _}, {_, csv}] = Req.get!("https://download.geonames.org/export/dump/DE.zip").body
+
+csv
+```
+
+```elixir
+de_features =
+  DF.load_csv!(csv, delimiter: "\t", header: false)
+  |> DF.rename(%{
+    "column_1" => "geoname_id",
+    "column_2" => "name",
+    "column_3" => "asciiname",
+    "column_4" => "alternatenames",
+    "column_5" => "lat",
+    "column_6" => "lon",
+    "column_7" => "feature_class",
+    "column_8" => "feature_code",
+    "column_9" => "country_code"
+  })
+```
+
+### Cities in Germany
+
+<!-- livebook:{"attrs":"eyJhc3NpZ25fdG8iOm51bGwsImNvbGxlY3QiOnRydWUsImRhdGFfZnJhbWUiOiJkZV9mZWF0dXJlcyIsImRhdGFfZnJhbWVfYWxpYXMiOiJFbGl4aXIuREYiLCJpc19kYXRhX2ZyYW1lIjp0cnVlLCJtaXNzaW5nX3JlcXVpcmUiOm51bGwsIm9wZXJhdGlvbnMiOlt7ImFjdGl2ZSI6dHJ1ZSwiY29sdW1uIjoiZmVhdHVyZV9jbGFzcyIsImRhdGFfb3B0aW9ucyI6eyJhbHRlcm5hdGVuYW1lcyI6InN0cmluZyIsImFzY2lpbmFtZSI6InN0cmluZyIsImNvbHVtbl8xMCI6InN0cmluZyIsImNvbHVtbl8xMSI6ImludGVnZXIiLCJjb2x1bW5fMTIiOiJpbnRlZ2VyIiwiY29sdW1uXzEzIjoiaW50ZWdlciIsImNvbHVtbl8xNCI6ImludGVnZXIiLCJjb2x1bW5fMTUiOiJpbnRlZ2VyIiwiY29sdW1uXzE2IjoiaW50ZWdlciIsImNvbHVtbl8xNyI6ImludGVnZXIiLCJjb2x1bW5fMTgiOiJzdHJpbmciLCJjb2x1bW5fMTkiOiJzdHJpbmciLCJjb3VudHJ5X2NvZGUiOiJzdHJpbmciLCJmZWF0dXJlX2NsYXNzIjoic3RyaW5nIiwiZmVhdHVyZV9jb2RlIjoic3RyaW5nIiwiZ2VvbmFtZV9pZCI6ImludGVnZXIiLCJsYXQiOiJmbG9hdCIsImxvbiI6ImZsb2F0IiwibmFtZSI6InN0cmluZyJ9LCJkYXRhbGlzdCI6WyJTIiwiSCIsIlAiLCJUIiwiUiIsIkEiLCJMIiwiViIsIlUiXSwiZmlsdGVyIjoiZXF1YWwiLCJtZXNzYWdlIjpudWxsLCJvcGVyYXRpb25fdHlwZSI6ImZpbHRlcnMiLCJ0eXBlIjoic3RyaW5nIiwidmFsdWUiOiJQIn0seyJhY3RpdmUiOnRydWUsImNvbHVtbiI6ImZlYXR1cmVfY29kZSIsImRhdGFfb3B0aW9ucyI6eyJhbHRlcm5hdGVuYW1lcyI6InN0cmluZyIsImFzY2lpbmFtZSI6InN0cmluZyIsImNvbHVtbl8xMCI6InN0cmluZyIsImNvbHVtbl8xMSI6ImludGVnZXIiLCJjb2x1bW5fMTIiOiJpbnRlZ2VyIiwiY29sdW1uXzEzIjoiaW50ZWdlciIsImNvbHVtbl8xNCI6ImludGVnZXIiLCJjb2x1bW5fMTUiOiJpbnRlZ2VyIiwiY29sdW1uXzE2IjoiaW50ZWdlciIsImNvbHVtbl8xNyI6ImludGVnZXIiLCJjb2x1bW5fMTgiOiJzdHJpbmciLCJjb2x1bW5fMTkiOiJzdHJpbmciLCJjb3VudHJ5X2NvZGUiOiJzdHJpbmciLCJmZWF0dXJlX2NsYXNzIjoic3RyaW5nIiwiZmVhdHVyZV9jb2RlIjoic3RyaW5nIiwiZ2VvbmFtZV9pZCI6ImludGVnZXIiLCJsYXQiOiJmbG9hdCIsImxvbiI6ImZsb2F0IiwibmFtZSI6InN0cmluZyJ9LCJkYXRhbGlzdCI6WyJQUExYIiwiUFBMIiwiUFBMQTQiLCJQUExMIiwiUFBMQTMiLCJQUExXIiwiUFBMSCIsIlBQTEEyIiwiUFBMUSIsIlBQTEEiLCJQUExGIiwiUFBMUyIsIlBQTEMiLCJQUExSIiwiUFBMRyIsIlBQTENIIiwiUFBMQTUiXSwiZmlsdGVyIjoiZXF1YWwiLCJtZXNzYWdlIjpudWxsLCJvcGVyYXRpb25fdHlwZSI6ImZpbHRlcnMiLCJ0eXBlIjoic3RyaW5nIiwidmFsdWUiOiJQUEwifV19","chunks":null,"kind":"Elixir.KinoExplorer.DataTransformCell","livebook_object":"smart_cell"} -->
+
+```elixir
+de_features
+|> DF.lazy()
+|> DF.filter(feature_class == "P" and feature_code == "PPL")
+|> DF.collect()
+```
