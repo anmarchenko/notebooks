@@ -1,0 +1,253 @@
+# Erlang Data Structures and Storage
+
+## Introduction
+
+With Erlang, and by extension Elixir, being functional programming languages,
+we can expect that the data structures that we have access to natively on the
+BEAM are immutable are cannot be altered whenever they are passed to a function.
+As a construct, immutability provides some amazing guarantees (especially in a team
+environment). It means that we can rest easy knowing that the data that we pass from
+function to function is not being changed out from under us and unintended side-effects
+are not something that we generally need to worry about.
+
+<!-- livebook:{"break_markdown":true} -->
+
+With that being said, Erlang and OTP ship with a wide array of immutable
+data structures right out of the box! This Livebook notebook serves as a reference
+so that you can see how you can use the built-in Erlang data structures right from
+Elixir!
+
+<!-- livebook:{"break_markdown":true} -->
+
+All the content presented in this Livebook comes from an upcoming
+publication that we are working on. If you find the content here
+useful, you should consider checking out [our book as there is a ton
+more to learn!](https://elixirpatterns.dev/free-chapters?utm_campaign=book-pre-launch-free-chapter&utm_medium=referral&utm_source=erlang-data-structure-livebook)
+
+<a target="_blank" href="https://elixirpatterns.dev/free-chapters?utm_campaign=book-pre-launch-free-chapter&utm_medium=referral&utm_source=erlang-data-structure-livebook">
+  <img src="https://embed.filekitcdn.com/e/cKv6Q7GV3Wt7KM5pCMDidB/9TfMWWS6pKv8MxoNNvNQTi" alt="Elixir Patterns Book Cover" width="300" />
+</a>
+
+## :queue Module
+
+Queues are one of the most basic (yet powerful) data structures in computer
+science and have applicability in a wide range of scenarios. Simply put, a
+queue defines a collection of items that are processed in a first-in-first-out
+fashion. In other words, an element `A` that was put into the queue before element `B`,
+will be processed prior to element `B`.
+
+<!-- livebook:{"break_markdown":true} -->
+
+Let's see how we can use the `:queue` module right from Elixir. For starters, you'll create
+a new queue and add some elements to it:
+
+```elixir
+# Create a new queue
+my_queue = :queue.new()
+
+# Add an element to the queue
+my_queue = :queue.in(1, my_queue)
+
+# Add another element to the queue
+my_queue = :queue.in(2, my_queue)
+
+# Convert the queue to a list to see what is in it
+:queue.to_list(my_queue)
+```
+
+Next, you'll pop some elements out of the queue:
+
+```elixir
+{{:value, my_value}, my_queue} = :queue.out(my_queue)
+IO.inspect(my_value, label: "First element popped")
+
+{{:value, my_value}, my_queue} = :queue.out(my_queue)
+IO.inspect(my_value, label: "Second element popped")
+
+{:empty, my_queue} =
+  my_queue
+  |> :queue.out()
+  |> IO.inspect(label: "When popping from an empty queue")
+```
+
+As you can see, the elements are returned in the same order that they were
+inserted. In addition, when the queue is empty, the call to `:queue.out/1`
+returns `{:empty, {[], []}}` where `{[], []}` is how Erlang represents an
+empty queue internally.
+
+<!-- livebook:{"break_markdown":true} -->
+
+Another nice feature of the `:queue` module is that you can pop the element that was
+last inserted into the queue (whereas in the previous example the element that was in the
+queue the longest was popped). This is useful if you need a data structure that has the
+behavior of a stack. In a stack, the last element that is inserted is also the first to
+be extracted. In other words, if element `A` is and then element `B` is inserted into a
+stack, then element `B` will be popped prior to `A`.
+
+<!-- livebook:{"break_markdown":true} -->
+
+Let's experiment with using the `:queue` module for modeling a stack:
+
+```elixir
+# Create a new queue
+my_stack = :queue.new()
+
+# Add an element to the queue
+my_stack = :queue.in(1, my_stack)
+
+# Add another element to the queue
+my_stack = :queue.in(2, my_stack)
+
+# Add another element to the queue
+my_stack = :queue.in(3, my_stack)
+```
+
+Next we'll pop some elements out of the stack. Be sure to note the order
+in which the elements are returned as compared to the regular queue.
+
+```elixir
+{{:value, my_value}, my_stack} = :queue.out_r(my_stack)
+IO.inspect(my_value, label: "First element popped")
+
+{{:value, my_value}, my_stack} = :queue.out_r(my_stack)
+IO.inspect(my_value, label: "Second element popped")
+
+{{:value, my_value}, my_stack} = :queue.out_r(my_stack)
+IO.inspect(my_value, label: "Third element popped")
+```
+
+As you can see, the elements come back in a last-in-first-out order by
+using the `:queue.out_r/1` function as opposed to the `:queue.out/1` function.
+
+## :sets Module
+
+Sets are useful data structures for when you need to ensure that you only have one
+and only one of each item in the collection. In other words, there is no possibility
+of having duplicates in a set. If you attempt to insert a duplicate element into the
+set, you will receive the same set back. Erlang provides us with several different set
+implementations and it is important to know when each is applicable for the problem at
+hand. Let's take a look at the `:sets` module first.
+
+<!-- livebook:{"break_markdown":true} -->
+
+The Erlang `:sets` module allows you to add elements to the set if comparing them
+via `===` yields `false`. In addition, depending on how you initialize the set,
+you may have different underlying data structures that represent the set.
+
+```elixir
+# Create a new set
+unique_emails = :sets.new(version: 2)
+
+# Add some elements to the set
+unique_emails = :sets.add_element("john@cool-app.com", unique_emails)
+unique_emails = :sets.add_element("jane@cool-app.com", unique_emails)
+unique_emails = :sets.add_element("jane@cool-app.com", unique_emails)
+```
+
+As you can see from the previous snippet, when attempting to add `jane@cool-app.com`
+again, the `:sets.add_element/2` call yielded a set with only one entry of
+`jane@cool-app.com`. Having run the previous snippet to create the `unique_emails` set,
+let's see what other functions you can run on the set:
+
+```elixir
+unique_emails
+|> :sets.to_list()
+|> IO.inspect(label: "Convert set to list")
+
+"alex@cool-app.com"
+|> :sets.is_element(unique_emails)
+|> IO.inspect(label: "Element \"alex@cool-app.com\" in set?")
+```
+
+## :ordsets Module
+
+Another set implementation that Erlang offers is `:ordsets`. This module differs
+from the previously discussed `:sets` module in a couple of ways:
+
+1. The internal representation of the set is an ordered list where the order is defined by the [Erlang term order](https://www.erlang.org/doc/reference_manual/expressions.html#term-comparisons)
+2. It checks for element equality via `==` as opposed to `===`
+
+<!-- livebook:{"break_markdown":true} -->
+
+Let's create a set with the `:ordsets` module and see how it works:
+
+```elixir
+# Create a new ordered set
+my_set = :ordsets.new()
+
+# Add some elements to the set
+my_set = :ordsets.add_element("Jane Smith", my_set)
+my_set = :ordsets.add_element("Alex Koutmos", my_set)
+my_set = :ordsets.add_element("Alex Koutmos", my_set)
+
+# Convert the ordered set to a list
+:ordsets.to_list(my_set)
+```
+
+As you can see, the elements in the set are returned in the proper order and
+there are no duplicates in the end result.
+
+## :gb_sets Module
+
+The `:gb_sets` module is the last set implementation that we will be looking at. Like
+the previously mentioned modules, the user-facing APIs are more or less the same, with
+the differences being mostly in the underlying implementation of the data structure.
+Another thing to note is that `:gb_sets` behaves like `:ordsets` in that it compares
+elements via `==` and not `===`. In other words, if you need to differentiate between
+`42` and `42.0` in your set, this implementation is not the one for you. Under the
+hood, `:gb_sets` stores the set as a general balanced tree and so, operations on the
+set will be done in logarithmic time. Let's take a look at an example using `:gb_sets`
+to see how it compares to the other implementations:
+
+```elixir
+# Create a new set
+my_gb_set = :gb_sets.new()
+
+# Add some elements to the set
+my_gb_set = :gb_sets.add_element(42, my_gb_set)
+my_gb_set = :gb_sets.add_element(42.0, my_gb_set)
+my_gb_set = :gb_sets.add_element(2, my_gb_set)
+my_gb_set = :gb_sets.add_element(10, my_gb_set)
+my_gb_set = :gb_sets.add_element(10, my_gb_set)
+
+# Return a list of all the unique elements
+:gb_sets.to_list(my_gb_set)
+```
+
+As you can see, our end result only contains a list of the unique elements added
+to the set.
+
+## :array Module
+
+While you wouldn't expect arrays to be available in a functional programming language, they are
+indeed something that you get out of the box with Erlang. While arrays in Erlang don't have
+the same characteristics that you would expect from arrays in object-oriented languages, they
+do offer the ability to randomly access elements (albeit not in constant time). For those
+unfamiliar with arrays, they allow you to get and set elements by a numerical index. They
+differ from linked lists in that you can access element 5 for example without having to start
+at the head of the list and traverse it until you get to the fifth element. Let's take a look
+at an example to see how it works:
+
+```elixir
+# Create a new array
+my_array = :array.new()
+
+# Set some dummy data
+my_array = :array.set(0, "Alex Koutmos", my_array)
+my_array = :array.set(1, "Bob Smith", my_array)
+my_array = :array.set(2, "Jannet Angelo", my_array)
+
+# Retrieve some data
+1
+|> :array.get(my_array)
+|> IO.inspect(label: "Element at position 1")
+
+2
+|> :array.get(my_array)
+|> IO.inspect(label: "Element at position 2")
+```
+
+If you find yourself needing to extract data in a way that makes heavy use of the
+element's index, arrays may be a good option for you as tuples (the underlying data
+structure representing the array) are more performant when it comes to
+random element access when compared to say lists.

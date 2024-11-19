@@ -1,0 +1,337 @@
+# Howlongtobeat
+
+```elixir
+Mix.install([
+  {:httpoison, "~> 2.2"},
+  {:jason, "~> 1.4"},
+  {:floki, "~> 0.36.2"},
+  {:kino, "~> 0.14.1"}
+])
+```
+
+## Howlongtobeat client
+
+This client uses web scarping to get information from [Howlongtobeat](https://howlongtobeat.com) website.
+
+See also [Datadog dashboard](https://app.datadoghq.eu/dashboard/i8n-evm-d8k/howlongtobeat?fromUser=false&refresh_mode=sliding&from_ts=1727596925820&to_ts=1727600525820&live=true).
+
+```elixir
+defmodule HttpClient do
+  @moduledoc """
+  Common backend API helpers.
+  """
+
+  @retries 5
+
+  def get(url, params \\ %{}, headers \\ []) do
+    get_with_retries(url, params, headers, @retries)
+  end
+
+  def idempotent_post(url, body, headers) do
+    post_with_retries(url, body, headers, @retries)
+  end
+
+  defp post_with_retries(url, body, headers, retries) do
+    case url
+         |> HTTPoison.post(body, headers, timeout: 2_000, recv_timeout: 2_000)
+         |> retrieve_body() do
+      {:ok, body} ->
+        body
+
+      {:error, _} = error_tuple ->
+        if retries > 0 do
+          post_with_retries(url, body, headers, retries - 1)
+        else
+          error_tuple
+        end
+    end
+  end
+
+  defp get_with_retries(url, params, headers, retries) do
+    case HTTPoison.get(url, headers, [{:params, params}]) do
+      {:ok, %HTTPoison.Response{status_code: code, body: body}} when code < 400 ->
+        body
+
+      {:ok, %HTTPoison.Response{status_code: code}} ->
+        if retries > 0 do
+          get_with_retries(url, params, headers, retries - 1)
+        else
+          {
+            :error,
+            """
+            HTTP status code: #{code}.
+            Accessed url: [#{url}].
+            Params were: #{inspect(params)}
+            """
+          }
+        end
+
+      {:error, %HTTPoison.Error{reason: reason}} ->
+        if retries > 0 do
+          get_with_retries(url, params, headers, retries - 1)
+        else
+          {:error, reason}
+        end
+    end
+  end
+
+  defp retrieve_body({:error, %HTTPoison.Error{reason: reason}}), do: {:error, reason}
+
+  defp retrieve_body({:ok, %HTTPoison.Response{status_code: code, body: body}}) when code < 400,
+    do: {:ok, body}
+
+  defp retrieve_body({:ok, %HTTPoison.Response{status_code: code}}),
+    do: {:error, "HTTP status code: #{code}."}
+end
+
+```
+
+```elixir
+defmodule Client do
+  @moduledoc """
+  HowLongToBeat client retrieves and parses information from https://howlongtobeat.com
+  """
+
+  def find(%{name: nil}) do
+    {:error, :no_name}
+  end
+
+  def find(%{release_date: nil}) do
+    {:error, :no_date}
+  end
+
+  def find(%{name: name, release_date: release_date}) do
+    with {:ok, search_url} <- search_url(),
+         {:ok, body} <- search_games(search_url, name) do
+      body
+      |> Jason.decode!()
+      |> Map.get("data", [])
+      |> find_game(name, release_date)
+    else
+      {:error, _reason} = error_tuple ->
+
+        error_tuple
+    end
+  end
+
+  def find(_), do: {:error, "argument is invalid"}
+
+  def get_by_id(nil) do
+    {:error, :game_id_not_found}
+  end
+
+  def get_by_id(game_id) do
+        with body when is_binary(body) <-
+               HttpClient.get(game_url(game_id)),
+             {:ok, document} <- Floki.parse_document(body) do
+          times =
+            document
+            |> Floki.find("div[class^=GameStats_game_times] li")
+            |> Enum.map(&parse_time/1)
+            |> Enum.filter(& &1)
+
+          if Enum.empty?(times) do
+            {:error, :times_not_available}
+          else
+            {:ok, Enum.into(times, %{external_id: game_id, external_url: game_url(game_id)})}
+          end
+        else
+          {:error, _} = error_tuple ->
+            error_tuple
+        end
+  end
+
+  
+  def fetch_search_url_path do
+      with {:ok, body} <-
+             fetch_main_page(),
+           {:ok, path} <- extract_script_link(body),
+           {:ok, js_script} <- fetch_js_code(path),
+           {:ok, search_url_path} <- extract_search_path(js_script) do
+        {:ok, search_url_path}
+      else
+        {:error, _reason} = error_tuple ->
+
+          error_tuple
+      end
+  end
+
+  def fetch_main_page do
+    case HttpClient.get(base_url()) do
+      body when is_binary(body) ->
+        {:ok, body}
+
+      error_tuple ->
+        error_tuple
+    end
+  end
+
+  def extract_script_link(body) do
+    case Regex.scan(~r{script.+src\=\"([^\s]+\_app\-[^\s]+\.js)\"}, body) do
+      [[_, path]] ->
+        {:ok, path}
+
+      _ ->
+        {:error, :script_not_found}
+    end
+  end
+
+  def fetch_js_code(path) do
+    case HttpClient.get("#{base_url()}#{path}") do
+      body when is_binary(body) ->
+        {:ok, body}
+
+      error_tuple ->
+        error_tuple
+    end
+  end
+
+  
+  def extract_search_path(js_code) do
+    case Regex.run(~r{fetch\(\"\/api\/search\/\"(?:\.concat\(\"\w+\"\))+}, js_code) do
+      [fetch] ->
+          search_path = fetch
+          |> String.replace("\"", "", global: true)
+          |> String.replace("fetch(", "")
+          |> String.replace(".concat(", "", global: true)
+          |> String.replace(")", "", global: true)
+
+      
+          {:ok, search_path}      
+        _ -> 
+          {:error, :search_url_not_parsable}
+    end   
+  end
+
+  defp search_games(search_url, name) do
+    case HttpClient.idempotent_post(
+           search_url,
+           Jason.encode!(%{
+             "searchType" => "games",
+             "searchTerms" => String.split(name),
+             "searchPage" => 1,
+             "size" => 5,
+             "searchOptions" => %{
+               "games" => %{
+                 "userId" => 0,
+                 "platform" => "",
+                 "sortCategory" => "popular",
+                 "rangeCategory" => "main",
+                 "rangeTime" => %{"min" => 0, "max" => 0},
+                 "gameplay" => %{"perspective" => "", "flow" => "", "genre" => ""},
+                 "modifier" => ""
+               },
+               "users" => %{"sortCategory" => "postcount"},
+               "filter" => "",
+               "sort" => 0,
+               "randomizer" => 0
+             }
+           }),
+           [
+             {"Accept", "*/*"},
+             {"Content-Type", "application/json"},
+             {"Host", "howlongtobeat.com"},
+             {"Origin", "https://howlongtobeat.com"},
+             {"Referer", "https://howlongtobeat.com/"}
+           ]
+         ) do
+      body when is_binary(body) ->
+        {:ok, body}
+
+      error_tuple ->
+        error_tuple
+    end
+  end
+
+  defp find_game([game], _, _) do
+    game
+    |> extract_game_id()
+    |> get_by_id()
+  end
+
+  defp find_game([_ | _] = games, name, release_date) do
+    case Enum.filter(games, fn game ->
+           String.downcase(game["game_name"]) == String.downcase(name) &&
+             game["release_world"] == release_date.year
+         end) do
+      [game] ->
+        find_game([game], name, release_date)
+
+      [game | _] ->
+        find_game([game], name, release_date)
+
+      [] ->
+        {:error, :not_found}
+    end
+  end
+
+  defp find_game(_, _, _) do
+    {:error, :not_found}
+  end
+
+  defp extract_game_id(%{"game_id" => id}), do: Integer.to_string(id)
+  defp extract_game_id(_), do: nil
+
+  defp parse_time({_, _, [{"h4", _, [label]}, {"h5", _, [time]}]}) do
+    case String.trim(label) do
+      "Main Story" ->
+        parse_time_value(:main, time)
+
+      "Main + Sides" ->
+        parse_time_value(:main_extra, time)
+
+      "Completionist" ->
+        parse_time_value(:completionist, time)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp parse_time(_), do: nil
+
+  defp parse_time_value(key, time) do
+    res =
+      time
+      |> String.replace("Hours", "")
+      |> String.replace("½", ".5")
+      |> String.trim()
+      |> Float.parse()
+
+    case res do
+      {num, _} ->
+        {key, floor(num * 60)}
+
+      :error ->
+        nil
+    end
+  end
+
+  defp search_url do
+    case fetch_search_url_path() do
+      {:ok, search_url_path} ->
+        {:ok, "#{base_url()}#{search_url_path}"}
+
+      error_tuple ->
+        error_tuple
+    end
+  end
+
+  defp game_url(game_id), do: "#{base_url()}/game/#{game_id}"
+
+  defp base_url, do: "https://howlongtobeat.com"
+end
+
+```
+
+## Search game
+
+```elixir
+Client.find(%{name: "Astro Bot", release_date: ~D[2024-09-06]})
+```
+
+## Test search url extraction
+
+```elixir
+Client.fetch_search_url_path()
+```

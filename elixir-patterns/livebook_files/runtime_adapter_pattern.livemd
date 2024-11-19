@@ -1,0 +1,332 @@
+# Run Time Adapter Pattern - free sample
+
+## This is a free sample from the Elixir Patterns book
+
+<a target="_blank" href="https://elixirpatterns.dev?utm_campaign=chapter-8-release&utm_source=free-livebook-notebooks&utm_medium=livebook-notebook">
+  <img 
+    src="https://i.imgur.com/0eu8Bv0.png"
+    alt="Elixir Patterns Book Cover"
+    width="350"
+  />
+</a>
+
+If you want to know more about the book:
+
+* You can [download two free chapters + accompanying Livebook notebooks](https://elixirpatterns.dev/free-chapters?utm_campaign=chapter-8-release&utm_source=free-livebook-notebooks&utm_medium=livebook-notebook).
+* Or, you can [buy the complete book together with's accompanying Livebook notebooks](https://elixirpatterns.dev/?utm_campaign=chapter-8-release&utm_source=free-livebook-notebooks&utm_medium=livebook-notebook).
+
+## Introduction
+
+[<- Back to index](../index.livemd#livebook-files)
+
+<!-- livebook:{"break_markdown":true} -->
+
+The pattern that we will be covering in this Livebook is the [adapter
+pattern](https://en.wikipedia.org/wiki/Adapter_pattern). This pattern can be used inside or
+outside the context of processes and supervision trees and is more of a general-purpose pattern
+that can be used to organize your code. In short, the adapter pattern allows us to define a common
+behaviour (more commonly referred to as interfaces in the object-oriented world) that modules can
+implement so we can easily swap out them at run-time or compile-time, depending on the needs of
+the application.
+
+In other words, given that all the modules that implement a behaviour expose that
+same public facing functions, which implementation of the behaviour we leverage should not require
+any complex code changes aside from selecting the implementation that we want to leverage.
+
+The adapter pattern is particularly useful when you need to wrap the interface of an existing
+library or dependency within a new definition that you control. For example, if you are sending
+SMS messages or emails, the libraries that you would use to send those messages probably have a
+different interface than what you have in your application. Those libraries may have functions
+like `send_email/1` or `send_sms/1`, but perhaps the functions that you have in your application
+are `send_registration_email/1` and `send_token_sms/1`. The adapter pattern allows us to have the
+functions `send_registration_email/1` and `send_token_sms/1` defined within a behaviour, and one
+implementation of that behaviour could wrap and extend the `send_email/1` and `send_sms/1`
+functions from our dependencies and another implementation of the behaviour may just log to STDOUT
+that an email was sent. Either way, we now have a consistent interface that we can rely on
+throughout the rest of the application, and swapping implementations is a trivial matter.
+
+Now that we have gone through the theory side, it is time to dive into the code and see
+this pattern in action. In Elixir, we have two options for implementing the
+adapter pattern. We can either have a compile-time configuration or a run-time configuration for
+which adapter is used. In this Livebook we will cover how to implement the run-time adapter pattern
+first.
+
+## Defining the behaviour
+
+As the name suggests, the run-time adapter pattern allows you to adjust the desired adapter at
+run-time. In other words, while the application is running, you can make an on-the-fly
+configuration change and swap out which adapter is being leveraged.
+
+Having a run-time adjustable adapter is useful in cases where you do not know at build time what
+adapter you will be using. For example, this is useful when you build your application, deploy it,
+and then, based on the environment variables that are available to the application you determine
+what adapter to use.  This can happen when you are building a deployable artifact of your
+application and the same artifact is used in staging and production, but in staging you don't send
+real emails, and in production, you do send real emails. Given that we cannot make this decision at
+build time, we need to make the decision at run time.
+
+In order to show how this pattern works in a real-world setting, we will be building a very simple
+Stripe client. This client will support [creating](https://docs.stripe.com/api/customers/create)
+and [deleting](https://docs.stripe.com/api/customers/delete]) customers. We will have a simple
+adapter that we can use for development purposes that produces canned responses, and we will have a production adapter that makes real HTTP calls to the Stripe API using the [Erlang `:httpc` HTTP
+client](https://www.erlang.org/doc/apps/inets/httpc.html).
+
+The first thing we need when implementing the adapter pattern is a module that defines the
+behaviour-specific functions. Let's take a look at our `StripeClient.Adapter` module to see this
+in practice:
+
+```elixir
+defmodule StripeClient.Adapter do
+  @doc "Create a customer in Stripe"
+  @callback create_customer(params :: map()) ::
+              {:ok, customer :: map()} | {:error, reason :: String.t()}
+
+  @doc "Delete a customer in Stripe"
+  @callback delete_customer(id :: String.t()) ::
+    :ok | {:error, reason :: String.t()}
+end
+```
+
+As you can see, defining a behaviour is only a matter of defining the specifications for the
+functions that a module needs to implement and denoting those specifications with the `@callback`
+attribute. If there are callback functions that are optional for the implementations of a
+behaviour, you can use the `@optional_callback` attribute to specify those. We won't be covering
+optional callbacks in this section but be sure to check out the
+[Elixir docs](https://hexdocs.pm/elixir/1.17.2/typespecs.html#optional-callbacks) if this is
+something that you need.
+
+You can define as many callback functions as you need, but for the
+purposes of this example, we will just have the `create_customer/1` and `delete_customer/1`
+callbacks.
+
+## Development adapter module
+
+With our behaviour module in place, we can now define our local development and production
+adapters. Let's start with the local development adapter:
+
+```elixir
+defmodule StripeClient.Adapters.Dev do
+  # Using the `@behaviour` attribute specifies the behaviour that the module
+  # must conform to.
+  @behaviour StripeClient.Adapter
+
+  require Logger
+
+  # The `@impl ...` attribute marks a function as implementing a function for the
+  # provided behaviour.
+  @impl StripeClient.Adapter
+  def create_customer(params) do
+    Logger.debug("DEV create_customer with params: #{inspect(params)}")
+
+    {:ok, %{"id" => "cus_123", "object" => "customer"}}
+  end
+
+  @impl StripeClient.Adapter
+  def delete_customer(id) do
+    Logger.debug("DEV delete_customer with ID: #{inspect(id)}")
+
+    :ok
+  end
+end
+```
+
+By using the `@behaviour StripeClient.Adapter` attribute at the top of our module, we can tell the
+Elixir compiler that this module implements the provided behaviour. As such, we need to implement
+the two functions that were defined via `@callback` in the `StripeClient.Adapter` module. We denote
+which functions are from the provided behaviour by adding the `@impl ...` attribute before each
+function definition. By doing this, we get several benefits:
+
+1. The Elixir compiler will generate warnings when functions are incorrectly tagged with `@impl`.
+2. The Elixir compiler will generate warnings for functions that are missing `@impl` attributes (given that at least one other callback function has an `@impl`).
+3. It makes it easier to understand a codebase and why certain functions exist.
+
+Aside from the behaviour-specific plumbing, our module is pretty straightforward and simply
+returns canned responses for each function. For local development, this may be all we really need
+since we do not want to interact with Stripe.
+
+## HTTP adapter module
+
+For production though, we will need a module that can actually make HTTP calls to the Stripe API.
+Once again we'll define a module that implements the `StripeClient.Adapter` behaviour, but this time
+it will be capable of making HTTP calls.
+
+Let's start by taking a look at the implementations of the
+callback functions in the `StripeClient.Adapter.HTTP` module to see how this is done:
+
+```elixir
+defmodule StripeClient.Adapters.HTTP do
+  @behaviour StripeClient.Adapter
+
+  require Logger
+
+  # Just like with the development implementation, we denote the
+  # callbacks using the `@impl` attribute.
+  @impl StripeClient.Adapter
+  def create_customer(params) do
+    Logger.info("HTTP create_customer with params: #{inspect(params)}")
+
+    # Using the Erlang `:httpc` and `:json` libraries we can make an HTTP POST to
+    # the Stripe API.
+    :post
+    |> :httpc.request(
+      {url("/customers"), headers(), ~c"application/json", :json.encode(params)},
+      [],
+      []
+    )
+    |> handle_response()
+  end
+
+  @impl StripeClient.Adapter
+  def delete_customer(id) do
+    Logger.info("HTTP delete_customer with ID: #{inspect(id)}")
+
+    # We can also make DELETE calls to the Stripe API.
+    :delete
+    |> :httpc.request({url("/customers/#{id}"), headers()}, [], [])
+    |> handle_response()
+  end
+
+  defp handle_response({:ok, {{_version, 200, _status}, _headers, resp_body}}) do
+    # After pattern matching on a successful response from the Stripe API, we decode the
+    # response body and return an `:ok`
+    {:ok, resp_body |> List.to_string() |> :json.decode()}
+  end
+
+  defp handle_response({:ok, {{_version, status, _status}, _headers, _body}}) do
+    Logger.warning("Stripe API call failed: #{inspect(status)}")
+
+    # All other responses are assumed to be an error and we log out the response.
+    {:error, "Stripe API responded with #{status} status"}
+  end
+
+  # We have a helper function for creating the full request URL.
+  defp url(endpoint) do
+    ~c"https://api.stripe.com/v1#{endpoint}"
+  end
+
+  # This helper function generates the required request headers including the
+  # authorization header.
+  defp headers do
+    auth_token =
+      :my_app
+      |> Application.fetch_env!(__MODULE__)
+      |> Keyword.fetch!(:auth_token)
+
+    [{~c"Authorization", ~c"Bearer #{auth_token}"}]
+  end
+end
+```
+
+Similarly to the `StripeClient.Adapter.Dev` adapter, we once again have the `create_customer/1`
+and `delete_customer/1` functions. Unlike last time, we now have actual HTTP functionality in our
+module. The `create_customer/1` function makes an HTTP POST call to the Stripe API and encodes our
+parameters (passed in as a map) as JSON using the [Erlang `:json`
+library](https://erlang.org/documentation/doc-15.0-rc3/lib/stdlib-6.0/doc/html/json.html). The
+`delete_customer/1` function instead makes an HTTP DELETE call to the Stripe API and only needs to
+provide the URL for the resource that we are deleting.
+
+Our utility functions help us perform some basic tasks that can be used between all of our functions defined by our behaviour. These include creating the required headers for requests, creating the request URLs and also handling responses from the Stripe API.
+
+In a real world application you may require more verbose logging and error handling, but for demonstration purposes of the adapter pattern this is sufficient. One thing to point out is how the `headers/0` creates the authorization header for the request. Specifically, it fetches the `:auth_token` configuration for the module from the application config.
+
+## Client module
+
+All that is left now is to create the module that determines at run-time what adapter is used.
+This is also the module that will be used throughout the rest of the application and will act as
+the pass-through for the selected adapter.
+
+In other words, you would not directly interact with
+either the `StripeClient.Adapter.Dev` or the `StripeClient.Adapter.HTTP` modules.
+
+With that said, let's see what the `StripeClient` module looks like, and after that, we can test out this setup:
+
+```elixir
+defmodule StripeClient do
+  @behaviour StripeClient.Adapter
+
+  # Our Stripe client implements the same behaviour as the adapter implementations.
+  @impl StripeClient.Adapter
+  def create_customer(params) do
+    adapter().create_customer(params)
+  end
+
+  @impl StripeClient.Adapter
+  def delete_customer(id) do
+    adapter().delete_customer(id)
+  end
+
+  # The `adapter/0` function is how we select our configured adapter at run-time.
+  defp adapter do
+    :my_app
+    |> Application.fetch_env!(__MODULE__)
+    |> Keyword.fetch!(:adapter)
+  end
+end
+```
+
+Since our Stripe client module acts as our pass-through to our configured adapter, it must also
+implement all the functions from the `StripeClient.Adapter` behaviour. In each of the behaviour
+implementations you can see that we call the function `adapter/0`, and then invoke the same
+function on the configured adapter. It is the `adapter/0` function that allows us to select the
+adapter at run-time.
+
+## Testing the dev adapter
+
+With all of our Stripe modules in place, we are now ready to test things out. We'll start by
+calling `Application.put_env/3` in order to set the development adapter as the active adapter in
+the application configuration:
+
+```elixir
+Application.put_env(:my_app, StripeClient, adapter: StripeClient.Adapters.Dev)
+```
+
+After setting the application configuration, we can now make calls to the `StripeClient` module
+and get back a canned sample response:
+
+```elixir
+StripeClient.create_customer(%{})
+```
+
+## Testing the HTTP adapter
+
+In order to test the HTTP version of the adapter, all we need to do is make a couple of calls to
+`Application.put_env/3` so that we can switch over the adapters. Prior to making any HTTP calls we
+also need to start the `:inets` and `:ssl` applications in order for `:httpc` to be able to make
+HTTP calls. After doing that, we can now make calls to the real Stripe API to create
+and delete customers. This right here is the beauty of the adapter pattern! We can swap
+implementations at will, and the rest of the code functions without any issues.
+
+> #### Creating secrets in Livebook
+> 
+> Prior to running this example, you will need to create a secret in Livebook called
+> `STRIPE_TOKEN`. You can create secrets in Livebook by clicking on the pad lock in the left hand
+> nav menu and then selected `+ New secret`. After you have added your Stripe token as a secret
+> in Livebook, you should be all set to proceed.
+
+```elixir
+# We set the active adapter to the HTTP version
+Application.put_env(:my_app, StripeClient, adapter: StripeClient.Adapters.HTTP)
+
+# We then add the additional configuration for the `StripeClient.Adapters.HTTP` module
+# so that it has the authentication token. As a side note, Livebook secrets are prefixed with
+# `LB_` which is why the call to `System.fetch_env!/2` looks the way it does.
+Application.put_env(
+  :my_app,
+  StripeClient.Adapters.HTTP,
+  auth_token: System.fetch_env!("LB_STRIPE_TOKEN")
+)
+
+# We start the additional Erlang applications
+:inets.start()
+:ssl.start()
+
+# We create a blank customer and capture the ID
+{:ok, %{"id" => customer_id}} = StripeClient.create_customer(%{})
+
+# We immediately delete the customer
+{:ok, %{"deleted" => true}} = StripeClient.delete_customer(customer_id)
+```
+
+As you can see, the run-time adapter pattern allows us to easily switch between different
+implementations of our behaviour. This enables us to tailor our implementations to the environments
+that they are intended to run in.

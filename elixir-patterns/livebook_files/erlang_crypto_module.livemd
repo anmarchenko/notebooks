@@ -1,0 +1,164 @@
+# Erlang Crypto Module
+
+## Introduction
+
+Erlang and OTP ship with a plethora of useful modules necessary for performing everyday
+tasks and operations. One of those modules is the `:crypto` moldule. This module contains
+all sorts of functions that allow you to compute hashes, symmetrically encrypt data, and much
+much more. Feel free to use this Livebook as a reference for how to use some of the functions
+available to you in the `:crypto` module.
+
+<!-- livebook:{"break_markdown":true} -->
+
+All the content presented in this Livebook comes from an upcoming
+publication that we are working on. If you find the content here
+useful, you should consider checking out [our book as there is a ton
+more to learn!](https://elixirpatterns.dev/free-chapters?utm_campaign=book-pre-launch-free-chapter&utm_medium=referral&utm_source=erlang-data-structure-livebook)
+
+<a target="_blank" href="https://elixirpatterns.dev/free-chapters?utm_campaign=book-pre-launch-free-chapter&utm_medium=referral&utm_source=erlang-data-structure-livebook">
+  <img src="https://embed.filekitcdn.com/e/cKv6Q7GV3Wt7KM5pCMDidB/9TfMWWS6pKv8MxoNNvNQTi" alt="Elixir Patterns Book Cover" width="300" />
+</a>
+
+## Hash Functions
+
+Hash functions can deterministically compute an output (i.e the same) of a fixed
+length, regardless of the size of the input. In other words, given a hash function `X`, and input data `Y` you will
+always get an output of `Z` (or if you prefer it as an equation `X(Y) = Z`). This also means that you cannot reliably
+reconstruct the input from the output given that hash functions are one-way functions and reduce an arbitrary input
+space into a finite output space. The fact that these functions work one way is why hash functions are used to store
+passwords. In the case of a database leak, the attacker would need to attempt a large number of permutations in
+order to find some value that would yield the same output as to log in to someone else's account.
+
+<!-- livebook:{"break_markdown":true} -->
+
+Let's take a look at some hash functions and see how they work:
+
+```elixir
+:md5
+|> :crypto.hash("This is some data")
+|> IO.inspect(label: "Binary MD5 hash")
+
+:blake2s
+|> :crypto.hash("This is some data")
+|> IO.inspect(label: "Binary Blake2 hash")
+
+:blake2s
+|> :crypto.hash("This is some other data")
+|> Base.encode16()
+|> IO.inspect(label: "Encoded Blake2 hash")
+
+:crypto.hash(:sha256, "This is some other data")
+|> Base.encode16()
+|> IO.inspect(label: "Encoded SHA256 hash")
+```
+
+## Message Authentication Codes
+
+Message authentication codes, or MACs for short allow message senders and recipients
+to verify that the messages that are shared are both authentic and have not been tampered with. Given a shared secret
+key between the sender and receiver, the two parties can pass a message payload through a MAC function and generate
+an authentication code that can be used to verify the message once it is received. One example where this is
+particularly useful is when your application supports webhook functionality. The best way to ensure that the payload
+that you received has not been tampered with and is indeed authentic is to have your sending application provide to
+you their result of the MAC function and you can compare that to what you compute on your side. If the two values
+match then you know that the inbound message can be safely processed.
+
+<!-- livebook:{"break_markdown":true} -->
+
+Let's take a look at a practical example as to see how this would work in the real world:
+
+```elixir
+# The `generate_hmac` helper function will generate a 
+# MAC hash using the SHA256 algorithm
+generate_hmac = fn secret_key, payload ->
+  :hmac
+  |> :crypto.mac(:sha256, secret_key, payload)
+  |> Base.encode64()
+end
+
+# The `validate_hmac` helper function will check 
+# to see if the secret key provided yields the expected MAC hash
+validate_hmac = fn your_key, payload, expected_hash ->
+  :hmac
+  |> :crypto.mac(:sha256, your_key, payload)
+  |> Base.encode64()
+  |> Kernel.==(expected_hash)
+end
+
+# We generate some dummy data and serialize it using `:erlang.term_to_binary/1`.
+payload = :erlang.term_to_binary(%{some: "Data", i: "Need"}) |> Base.encode64()
+
+# We generate a secret key and also compute the correct hmac value. The 
+# `correct_hmac_hash` value would be sent to your service for example so that
+# you can compare your computed value. 
+secret_key = "this_is_a_secret_and_secure_key"
+correct_hmac_hash = generate_hmac.(secret_key, payload)
+
+# If you do not know the correct key, you cannot successfully recopmute the hmac value
+"INVALID_KEY"
+|> validate_hmac.(payload, correct_hmac_hash)
+|> IO.inspect(label: "Invalid key result")
+
+# If the payload has been tampered with, the hmac value will not align with what
+# was provided
+secret_key
+|> validate_hmac.("The payload has been tampered with", correct_hmac_hash)
+|> IO.inspect(label: "Tampered payload result")
+
+# If you know the correct key, you can validate the provided hmac value
+secret_key
+|> validate_hmac.(payload, correct_hmac_hash)
+|> IO.inspect(label: "Correct key and payload result")
+```
+
+## Symmetric Encryption
+
+Symmetric encryption is probably the category of cryptographic tools that people most
+associate with cryptography. With symmetric cryptography, a message is encrypted with a secret key, at which point it
+is no longer discernible what the original message was. In order to derive the original message, the same secret key
+must be applied to the encrypted message through a function that decrypts the encrypted message. If you are
+encrypting data at rest in a database, this is generally how it is done. It is encrypted via a symmetric encryption
+algorithm and then written to the database.
+
+```elixir
+# Helper function to encrypt messages. Note that the opts list
+# has the `encrypt: true` option set to denote that we are encrypting
+# data and that we want to pad our data with null bytes in case the
+# payload is not block aligned.
+encrypt = fn message, key ->
+  opts = [encrypt: true, padding: :zero]
+  :crypto.crypto_one_time(:aes_256_ecb, key, message, opts)
+end
+
+# Helper function to decrypt message. Note that we do not need any
+# padding options, but we do need to tell the `:crypto.crypto_one_time/4`
+# function that we are decrypting and not encrypting by passing `encrypt: false`.
+decrypt = fn payload, key ->
+  opts = [encrypt: false]
+
+  :aes_256_ecb
+  |> :crypto.crypto_one_time(key, payload, opts)
+  |> String.trim(<<0>>)
+end
+
+message = "This is a very very important message. Keep it secret...keep safe"
+secret_key = :crypto.strong_rand_bytes(32)
+encrypted_message = encrypt.(message, secret_key)
+
+# When a key of the wrong length is provided
+try do
+  decrypt.(encrypted_message, "INVALID_KEY")
+rescue
+  error -> IO.inspect(error, label: "Invalid key length error")
+end
+
+# When an invalid key is provided
+encrypted_message
+|> decrypt.(:crypto.strong_rand_bytes(32))
+|> IO.inspect(label: "Invalid key")
+
+# When the correct key is provided
+encrypted_message
+|> decrypt.(secret_key)
+|> IO.inspect(label: "Decrypted message")
+```

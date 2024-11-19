@@ -1,0 +1,174 @@
+# Erlang Module Functions
+
+## Introduction
+
+The Erlang standard library is full of some really useful and interesting stuff. As an
+Elixir programmer, it is important that you are familiar with the standard library so
+that you know what tools are available to you!
+
+<!-- livebook:{"break_markdown":true} -->
+
+With that being said, Erlang comes with a module called `:erlang` and this module contains a
+wide array of utility functions that are applicable in a wide range of use-cases. Let's
+take a look at some of these utility functions and see how they are used.
+
+<!-- livebook:{"break_markdown":true} -->
+
+All the content presented in this Livebook comes from an upcoming
+publication that we are working on. If you find the content here
+useful, you should consider checking out [our book as there is a ton
+more to learn!](https://elixirpatterns.dev/free-chapters?utm_campaign=book-pre-launch-free-chapter&utm_medium=referral&utm_source=erlang-data-structure-livebook)
+
+<a target="_blank" href="https://elixirpatterns.dev/free-chapters?utm_campaign=book-pre-launch-free-chapter&utm_medium=referral&utm_source=erlang-data-structure-livebook">
+  <img src="https://embed.filekitcdn.com/e/cKv6Q7GV3Wt7KM5pCMDidB/9TfMWWS6pKv8MxoNNvNQTi" alt="Elixir Patterns Book Cover" width="300" />
+</a>
+
+## :binary_to_term and :term_to_binary
+
+Oftentimes, you'll want to serialize and deserialize Erlang and Elixir terms to a format that you can easily persist
+and read in at a later point in time. The `:erlang.binary_to_term/{1,2}` and `:erlang.term_to_binary/{1,2}` functions
+allow you to do just that.
+
+<!-- livebook:{"break_markdown":true} -->
+
+For those not familiar wit hthe terminology (pun very much intended), a term in Elixir and Erlang is any piece of data like a number, map, list, tuple, etc. The `any()` typespec in Elixir is
+a way to denote that the argument that is being provided is an arbitrary term.
+
+<!-- livebook:{"break_markdown":true} -->
+
+Natively serializing Elixir and Erlang data can be used in the following instances:
+
+* When you need to continue work across application restarts and need to save state.
+* When you need to send (trusted) data to other Erlang or Elixir applications.
+* When you need to persist terms to a database or message queue.
+
+<!-- livebook:{"break_markdown":true} -->
+
+Let's see how this work in practice so that it is more clear:
+
+```elixir
+# Create some data
+my_data = %{name: "John Smith", age: 42, favorite_lang: :elixir}
+
+# Serialize the data using :erlang.term_to_binary/1
+base_64_serialized =
+  my_data
+  |> :erlang.term_to_binary()
+  |> Base.encode64()
+  |> IO.inspect(label: "Serialized data")
+
+# Deserialize the data using :erlang.binary_to_term/2 (be sure to use the `:safe` option
+# expecially when the data came from an untrusted source) 
+base_64_serialized
+|> Base.decode64!()
+|> :erlang.binary_to_term([:safe])
+|> IO.inspect(label: "Deserialized data")
+```
+
+## :md5
+
+MD5, while not super secure in the context of cryptography, can be useful for a number of other things given how quickly
+the hashes can be created. With that being said, the `:erlang.md5/1` function can be useful if you need to keep track of
+files and to see if they have changed by comparing a current hash to a previously captured hash.
+
+```elixir
+# Read the contents of a file and then compute the MD5 value
+"./livebook_files/erlang_module_functions.livemd"
+|> File.read!()
+|> :erlang.md5()
+```
+
+As you can see, it is straightforward to compute the MD5 hash of any binary or iolist data. If you need to transfer
+this data or display it and cannot send the raw binary as it is returned from the `:erlang.md5/1` function, you can
+always use the Elixir `Base` module and encode it.
+
+## :phash2
+
+If you have ever needed to partition data or spread work across a group of processes/nodes, `:erlang.phash2/2` is a very
+handy utility to have in your back pocket. Given any term, and an upper range, `:erlang.phash/2` will deterministically
+produce an integer within that range (`0..(upper_range - 1)` to be exact). In other words, every time you provide the term
+X to the function, you will get back the integer Y. This can be useful when partitioning data or work because then you
+can map any term back to the worker or partition that it belongs to.
+
+<!-- livebook:{"break_markdown":true} -->
+
+Let's take a look at a short example so you can see how `:erlang.phash2/2` distributes the hashes for a simple term:
+
+```elixir
+# Run through a range of integers from 1 to 100,000 and deterministically
+# count them based on their phash2 values
+1..100_000
+|> Enum.reduce(%{}, fn number, acc ->
+  index = :erlang.phash2("Some data - #{number}", 10)
+  Map.update(acc, index, 1, &(&1 + 1))
+end)
+```
+
+As you can see, the `:erlang.phash2/2` function does a good job of distributing the hash integer across the range
+provided even for minutely different terms. While the distribution is not 100% balanced, for all real-world scenarios
+this will be more than sufficient.
+
+## :memory
+
+In addition to providing a plethora of tools and utilities for you to use in your applications, Erlang also provides
+plenty of tools for introspecting the BEAM itself. One of those functions is the `:erlang.memory/0` function and it can
+give you a good overview as to how you are consuming memory on the BEAM:
+
+```elixir
+:erlang.memory()
+```
+
+All the results are reported in bytes and you can see the breakdown between the different resources that the BEAM
+offers to you. This can be very handy when running a system in production and you need to keep an eye on your
+application's memory usage.
+
+## :system_info
+
+The `:erlang.system_info/1` function allows you to fetch all sorts of information regarding the BEAM. You can see the
+current atom count, ETS table count, what are the system limits for the current invocation of the BEAM and so much more.
+You should definitely explore the [Erlang docs](https://www.erlang.org/doc/man/erlang.html#system_info-1) to see what else you can
+do. Here are some sample calls that you can play with:
+
+```elixir
+system_info_flags = [
+  :system_version,
+  :atom_count,
+  :atom_limit,
+  :ets_count,
+  :schedulers,
+  :emu_flavor
+]
+
+system_info_flags
+|> Enum.each(fn flag ->
+  flag
+  |> :erlang.system_info()
+  |> IO.inspect(label: flag)
+end)
+```
+
+As you can see, by passing different atoms to the `:erlang.system_info/1` function, you can retrieve information on that
+particular resource. Be sure to check out the Erlang docs for the full listing as there are many possible things that
+you can view.
+
+## :statistics
+
+Similarly to the `:erlang.system_info/1` function, there is the `:erlang.statistics/1`
+function that can be used to fetch detailed information about the current BEAM instance.
+Take a look at the following metrics to see what you can fetch:
+
+```elixir
+statistics_flags = [
+  :garbage_collection,
+  :reductions,
+  :run_queue_lengths,
+  :io
+]
+
+statistics_flags
+|> Enum.each(fn flag ->
+  flag
+  |> :erlang.statistics()
+  |> IO.inspect(label: flag)
+end)
+```

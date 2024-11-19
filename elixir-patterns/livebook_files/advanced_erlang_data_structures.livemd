@@ -1,0 +1,431 @@
+# Advanced Erlang Data Structures and Storage
+
+## Introduction
+
+While Erlang, and by extension Elixir, are functional programming languages, they also offer
+a number of mutable data structures and storage mechanisms optimized for certain use cases.
+For example, if you have some data that is read frequently but rarely ever updated, then
+`:persistent_term` might be what you are looking for.
+
+<!-- livebook:{"break_markdown":true} -->
+
+With that being said, let's take a look at some of the mutable data structures and storage
+mechanisms that we have access to right out of the box with Erlang and OTP.
+
+<!-- livebook:{"break_markdown":true} -->
+
+All the content presented in this Livebook comes from an upcoming
+publication that we are working on. If you find the content here
+useful, you should consider checking out [our book as there is a ton
+more to learn!](https://elixirpatterns.dev/free-chapters?utm_campaign=book-pre-launch-free-chapter&utm_medium=referral&utm_source=erlang-data-structure-livebook)
+
+<a target="_blank" href="https://elixirpatterns.dev/free-chapters?utm_campaign=book-pre-launch-free-chapter&utm_medium=referral&utm_source=erlang-data-structure-livebook">
+  <img src="https://embed.filekitcdn.com/e/cKv6Q7GV3Wt7KM5pCMDidB/9TfMWWS6pKv8MxoNNvNQTi" alt="Elixir Patterns Book Cover" width="300" />
+</a>
+
+## :digraph and :digraph_utils Modules
+
+In computer science, graphs are abstract data types that allow you to represent
+certain types of data where the elements in the dataset have relationships with
+[other pieces of data in the dataset](https://en.wikipedia.org/wiki/Graph_(abstract_data_type)).
+Some common examples of real-world problems described as graphs include:
+
+* Workflow engines
+* Social networks
+* Build systems
+* Routing and mapping
+* Recommendation engines
+
+<!-- livebook:{"break_markdown":true} -->
+
+In each of these problems you have a collection of vertices (also called nodes)
+connected to one another via edges. For example, in routing and mapping applications,
+cities and towns would be your vertices, and the roads that connect them would be your
+edges. Once you construct your graph with all of your vertices and edges, you can
+traverse it and ascertain all kinds of information (like the shortest path from city A
+to city B in a mapping application).
+
+<!-- livebook:{"break_markdown":true} -->
+
+In order to get comfortable with the `digraph` module and the accompanying utility
+module, let's construct a directed graph that represents a series of steps that we
+need to perform when a new user signs up for our SaaS service. The workflow steps
+are connected in a directed graph like so:
+
+<!-- livebook:{"break_markdown":true} -->
+
+```mermaid
+graph TD;
+  create_user(Create user in database)
+  upload_image(Upload image to S3)
+  bill_user(Bill credit card)
+  welcome_email(Send welcome email)
+
+  create_user --> upload_image
+  create_user --> bill_user
+
+  upload_image --> welcome_email
+  bill_user --> welcome_email
+```
+
+<!-- livebook:{"break_markdown":true} -->
+
+In order to build this graph using `:digraph`, you can do the following:
+
+```elixir
+# Create a new graph
+my_workflow = :digraph.new([:acyclic])
+
+# Dummy work function
+do_work = fn step ->
+  fn ->
+    IO.puts("Running the following step: " <> step)
+
+    # Simulate load
+    Process.sleep(500)
+  end
+end
+
+# Create the vertices
+:digraph.add_vertex(my_workflow, :create_user, do_work.("Create user in database"))
+:digraph.add_vertex(my_workflow, :upload_avatar, do_work.("Upload image to S3"))
+:digraph.add_vertex(my_workflow, :charge_card, do_work.("Bill credit card"))
+:digraph.add_vertex(my_workflow, :welcome_email, do_work.("Send welcome email"))
+
+# Create the edges
+:digraph.add_edge(my_workflow, :create_user, :upload_avatar)
+:digraph.add_edge(my_workflow, :create_user, :charge_card)
+:digraph.add_edge(my_workflow, :upload_avatar, :welcome_email)
+:digraph.add_edge(my_workflow, :charge_card, :welcome_email)
+```
+
+Once the graph is constructed, you can perform a wide array of operations on it:
+
+```elixir
+# Print info about graph
+:digraph.info(my_workflow) |> IO.inspect(label: "Graph info")
+
+# Which vertices are starting points into the graph
+:digraph.source_vertices(my_workflow) |> IO.inspect(label: "Graph entrypoints")
+
+# Which vertices are terminal points in the graph
+:digraph.sink_vertices(my_workflow) |> IO.inspect(label: "Graph exit points")
+
+# Are there any cycles in the graph?
+:digraph_utils.is_acyclic(my_workflow) |> IO.inspect(label: "Is acyclical?")
+
+# Traverse the graph in topological order (the graph is run in such a way where
+# dependencies are executed prior to when they are needed) and run the anonymous
+# function at each vertex
+my_workflow
+|> :digraph_utils.topsort()
+|> Enum.each(fn vertex ->
+  {_vertex, work_function} = :digraph.vertex(my_workflow, vertex)
+  work_function.()
+end)
+
+:digraph.delete(my_workflow)
+```
+
+Before moving on to counters and atomics it is important to note a few things about the
+`:digraph` module:
+
+* Under the hood, Erlang uses ETS to store the graph data. That data will only
+  be cleared if the process that created the graph terminates (as ETS tables are tied to
+  processes), or if `:digraph.delete/1` is called.
+* Since `:digraph` leverages ETS, it is in turn a mutable data structure. You'll
+  notice that in the previous code snippets the `my_workflow` variable is never updated,
+  but rather passed to each `:digraph` and `:digraph_utils` function as a reference to the
+  graph.
+
+## :ets Module
+
+Erlang Term Storage, or ETS for short, is a highly performant key-value store that can
+be used for storing large amounts of data. It is able to fulfill these requirements due
+to the fact that it is a mutable key-value store. Maps as implemented in Erlang, are not
+true key-value data structures given that they are represented by trees under the hood
+in order to support immutability.
+
+<!-- livebook:{"break_markdown":true} -->
+
+Let's start by experimenting with ETS by creating an ETS table that does not support
+duplicate keys and running some queries against the table:
+
+```elixir
+# Create a new ETS table
+unique_ets_table = :ets.new(:my_table, [:set])
+
+# Add data to the ETS table with the format `{ID, USER_DATA_MAP}`
+user_1 = {1, %{first_name: "Alex", last_name: "Koutmos", favorite_lang: :elixir}}
+user_2 = {2, %{first_name: "Hugo", last_name: "Barauna", favorite_lang: :elixir}}
+user_3 = {3, %{first_name: "Joe", last_name: "Smith", favorite_lang: :go}}
+
+:ets.insert(unique_ets_table, user_1)
+:ets.insert(unique_ets_table, user_2)
+:ets.insert(unique_ets_table, user_3)
+
+# Some simple ETS query functions
+:ets.lookup(unique_ets_table, 2) |> IO.inspect(label: "Get by ID")
+:ets.member(unique_ets_table, 100) |> IO.inspect(label: "Is member?")
+
+# Perform a MatchSpec query against the ETS table to retrieve only
+# the entries that match the MatchSpec
+unique_ets_table
+|> :ets.select([
+  {
+    {:"$1", %{first_name: :"$2", last_name: :"$3", favorite_lang: :elixir}},
+    [],
+    [%{id: :"$1", first_name: :"$2", last_name: :"$3"}]
+  }
+])
+|> IO.inspect(label: "Only users with Elixir as their favorite language")
+
+# Count the results from the MatchSpec select
+unique_ets_table
+|> :ets.select_count([
+  {
+    {:"$1", %{favorite_lang: :"$2"}},
+    [{:==, :"$2", :elixir}],
+    [true]
+  }
+])
+|> IO.inspect(label: "Number of users with Elixir as their favorite language")
+
+# Delete the ETS table
+:ets.delete(unique_ets_table)
+```
+
+There is a bit to unpack here so let's take it step by step. Firstly, entries in ETS table
+have the format `{KEY, VALUE}` and as you can see from the `:ets.lookup/2` and `:ets.member/2`
+calls you can fetch values by their `KEY`. The more complicated parts are the calls to
+`:ets.select/2` and `:ets.select_count/2`. Let's explain those in more detail.
+
+<!-- livebook:{"break_markdown":true} -->
+
+The second argument to both of the select functions is called a match specification
+(check out the [Erlang docs](https://www.erlang.org/doc/apps/erts/match_spec.html) for
+more information). A match specification is a way for ETS to compare the data in a table
+with the match specification provided in order to only return the data that matches. Let's
+deep dive into the match specification provided to `:ets.select/2` in order to better
+understand what is going on:
+
+<!-- livebook:{"break_markdown":true} -->
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+unique_ets_table
+|> :ets.select([
+  {
+    # The first element in the match specification tuple defines the match
+    # for the data in the ETS table. If you remember from the insert statements,
+    # the first element in the tuple was the ID and the second element was the
+    # data associated with that ID. The match below mirrors that structure,
+    # and uses `:$X` variable to denote parts of the ETS entry that are pattern
+    # matched without any filtering (and can be used and referenced in later
+    # portions of the match specification). We are able to filter for users who have
+    # Elixir as their favorite language given that it is hard coded in the
+    # match specification.
+    {:"$1", %{first_name: :"$2", last_name: :"$3", favorite_lang: :elixir}},
+    # The second argument is used to define any guards that should be used during the
+    # match specification. For example, if the ID (or the matched :"$1" variable in this
+    # case) needs to be less than 10, you would have an entry like so in the guard list:
+    # `{:"<", :"$1", 10}`. Take a look at the `:ets.select_count/2` call in the previous
+    # example as that make use of the guard clause to check for the favorite programming
+    # language to be Elixir.
+    [],
+    # The third argument defines the output from the select call. In this case since
+    # we matched on the id ($1), first name ($2), and last name ($3), our output
+    # looks like so:
+    # [{1, "Alex", "Koutmos"}, {2, "Hugo", "Barauna"}]
+    [{{:"$1", :"$2", :"$3"}}]
+  }
+])
+```
+
+<!-- livebook:{"break_markdown":true} -->
+
+Now that we have an understanding of how to use ETS as a key-value store with unique keys,
+let's take a look at using it as a key-value store where multiple keys can exist in the
+same table:
+
+```elixir
+# Create a new table
+user_actions_table = :ets.new(:my_table, [:bag])
+
+# User 1 actions
+:ets.insert(
+  user_actions_table,
+  {"user-1-id", %{action: "create_account", timestamp: NaiveDateTime.utc_now()}}
+)
+
+:ets.insert(
+  user_actions_table,
+  {"user-1-id", %{action: "update_account", timestamp: NaiveDateTime.utc_now()}}
+)
+
+:ets.insert(
+  user_actions_table,
+  {"user-1-id", %{action: "update_account", timestamp: NaiveDateTime.utc_now()}}
+)
+
+:ets.insert(
+  user_actions_table,
+  {"user-1-id", %{action: "log_out", timestamp: NaiveDateTime.utc_now()}}
+)
+
+# User 2 actions
+:ets.insert(
+  user_actions_table,
+  {"user-2-id", %{action: "log_out", timestamp: NaiveDateTime.utc_now()}}
+)
+
+# Get all the entries for user 1
+user_actions_table
+|> :ets.lookup("user-1-id")
+|> IO.inspect(label: "User 1 actions")
+
+:ets.delete(user_actions_table)
+```
+
+As you can see from this previous example where we have an ETS table that keeps track of user
+actions, by setting the type of ETS table to `:bag`, we are able to have multiple values
+for the same key. When we use the `:ets.lookup/2` function we retrieve all of the entries
+in the table for that particular user.
+
+## :atomics and :counters Modules
+
+Similarly to the `:digraph` module, the `:atomics` and `:counters` modules
+are not immutable data structures. In fact, they are not necessarily data structures
+so much as they are purpose-built data storage mechanisms. Specifically, they are intended
+for when you have a use case that needs to be **highly** optimized. With that
+disclaimer out of the way, let's see what these modules do!
+
+<!-- livebook:{"break_markdown":true} -->
+
+The `:atomics` and `:counters` modules are purpose-built, hardware-accelerated modules
+used for adding and subtracting from arrays of numbers in the most performant way
+possible. As the name implies, the `:atomics` module allows you to perform these
+operations in an atomic fashion such that there will be no data inconsistencies even
+if there are a large number of changes happening concurrently. The `:counters` module on the
+other hand allows you to make the trade-off as to whether you want additional performance
+at the expense of read inconsistencies.
+
+<!-- livebook:{"break_markdown":true} -->
+
+Let's play around with `:atomics` module first and see how it works in a high throughput
+environment:
+
+```elixir
+existing_user_index = 1
+new_user_index = 2
+
+# Create a new atomic with values being unsigned.
+# Index 1 will count new user interactions
+# while index 2 in the atomics array will count
+# existing user interactions in this example
+my_atomic = :atomics.new(2, signed: false)
+
+1..100_000
+|> Task.async_stream(
+  fn _ ->
+    user_type = Enum.random([:existing_user, :new_user])
+
+    case user_type do
+      :existing_user -> :atomics.add(my_atomic, existing_user_index, 1)
+      :new_user -> :atomics.add(my_atomic, new_user_index, 1)
+    end
+  end,
+  max_concurrency: 500
+)
+|> Stream.run()
+
+num_existing_users = :atomics.get(my_atomic, existing_user_index)
+num_new_users = :atomics.get(my_atomic, new_user_index)
+
+IO.inspect(num_existing_users, label: "Number of existing user requests")
+IO.inspect(num_new_users, label: "Number of new user requests")
+IO.inspect(num_existing_users + num_new_users, label: "Total number of requests")
+```
+
+In the above example, you created a new `:atomics` array of size two. The first position
+signifies the counts for existing user requests and the second position signifies the
+counts for new user requests. By leveraging `Task.async_stream/2`, you spawn a maximum of
+500 processes in order to simulate concurrent load on the atomic counter. As you can see, in
+the end, the total count is equal to our expected number of requests.
+
+<!-- livebook:{"break_markdown":true} -->
+
+Let's try the same thing, but with the `:counters` module:
+
+```elixir
+existing_user_index = 1
+new_user_index = 2
+
+# Create a new atomic with values being unsigned.
+# Index 1 will count new user interactions
+# while index 2 in the atomics array will count
+# existing user interactions in this example
+my_counter = :counters.new(2, [:write_concurrency])
+
+1..100_000
+|> Task.async_stream(
+  fn _ ->
+    user_type = Enum.random([:existing_user, :new_user])
+
+    case user_type do
+      :existing_user -> :counters.add(my_counter, existing_user_index, 1)
+      :new_user -> :counters.add(my_counter, new_user_index, 1)
+    end
+  end,
+  max_concurrency: 500
+)
+|> Stream.run()
+
+num_existing_users = :counters.get(my_counter, existing_user_index)
+num_new_users = :counters.get(my_counter, new_user_index)
+
+IO.inspect(num_existing_users, label: "Number of existing user requests")
+IO.inspect(num_new_users, label: "Number of new user requests")
+IO.inspect(num_existing_users + num_new_users, label: "Total number of requests")
+```
+
+As you can see, we are able to yield the same results with the `:counters` module as
+we did with the `:atomics` module. While these modules are not something that you
+should reach for on a day-to-day basis (given they are not immutable data structures),
+it is good to know they exist and are there if you need the extra performance.
+
+## :persistent_term Module
+
+Similarly to the `:digraph`, `:atomics`, and `:counters` modules, the `:persistent_term`
+module is another mutable data storage option that is purpose-built for read performance.
+This is an excellent option for when you have data that rarely changes but that is read
+often. As a warning, if the data in `:persistent_term` is changed, a global garbage
+collection must be run on all running processes in order to clean up any references to
+the persistent term entry.
+
+<!-- livebook:{"break_markdown":true} -->
+
+With that little warning out of the way, let's see how you can use `:persistent_term` to
+store your data. You can think of `:persistent_term` as a globally namespaced key-value
+store. In other words, if you know the key, you can access the data regardless of what
+process you are calling from. That's why it is good to namespace your keys like in the example
+below:
+
+```elixir
+# :persistent_term is used by Erlang and Elixir for certain
+# things as soon as the BEAM starts up
+:persistent_term.get() |> IO.inspect(limit: 4)
+
+# Put some data into :persistent_term
+:persistent_term.put({:my_app, :my_key}, %{some: "Data", that: "Rarely", ever: "Changes"})
+
+# Get some data out of :persistent_term
+{:my_app, :my_key}
+|> :persistent_term.get()
+|> Map.fetch(:some)
+```
+
+As you can see, by using `:persistent_term.get/0`, you can get all of the data currently
+stored in `:persistent_term`, and by using `:persistent_term.put/2` and
+`:persistent_term.get/1` you can write and read from the global data store.
