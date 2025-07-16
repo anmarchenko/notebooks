@@ -80,8 +80,10 @@ defmodule HttpClient do
   defp retrieve_body({:ok, %HTTPoison.Response{status_code: code, body: body}}) when code < 400,
     do: {:ok, body}
 
-  defp retrieve_body({:ok, %HTTPoison.Response{status_code: code}}),
-    do: {:error, "HTTP status code: #{code}."}
+  defp retrieve_body({:ok, %HTTPoison.Response{status_code: code} = response}) do
+    IO.inspect(response)
+    {:error, "HTTP status code: #{code}."}
+  end 
 end
 
 ```
@@ -188,7 +190,7 @@ defmodule Client do
 
   
   def extract_search_path(js_code) do
-    case Regex.run(~r{fetch\(\"\/api\/search\/\"(?:\.concat\(\"\w+\"\))+}, js_code) do
+    case Regex.run(~r{fetch\(\"\/api\/s\/\"(?:\.concat\(\"\w+\"\))+}, js_code) do
       [fetch] ->
           search_path = fetch
           |> String.replace("\"", "", global: true)
@@ -204,6 +206,7 @@ defmodule Client do
   end
 
   defp search_games(search_url, name) do
+    IO.inspect(search_url)
     case HttpClient.idempotent_post(
            search_url,
            Jason.encode!(%{
@@ -222,6 +225,7 @@ defmodule Client do
                  "modifier" => ""
                },
                "users" => %{"sortCategory" => "postcount"},
+               "lists" => %{"sortCategory" => "follows"},
                "filter" => "",
                "sort" => 0,
                "randomizer" => 0
@@ -229,16 +233,22 @@ defmodule Client do
            }),
            [
              {"Accept", "*/*"},
+             {"Accept-Encoding", "gzip, deflate, br"},
              {"Content-Type", "application/json"},
              {"Host", "howlongtobeat.com"},
              {"Origin", "https://howlongtobeat.com"},
-             {"Referer", "https://howlongtobeat.com/"}
+             {"Referer", "https://howlongtobeat.com/?q=Astr"},
+             {"User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15"},
+             {"Sec-Fetch-Dest", "empty"},
+             {"Sec-Fetch-Mode", "cors"},
+             {"Sec-Fetch-Site", "same-origin"},
            ]
          ) do
       body when is_binary(body) ->
         {:ok, body}
 
       error_tuple ->
+        IO.inspect(error_tuple)
         error_tuple
     end
   end

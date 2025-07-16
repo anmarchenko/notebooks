@@ -1,0 +1,13 @@
+# Igroteka ops
+
+## Manually add opencritic reviews
+
+```elixir
+Skaro.Reviews.load_by_id("XXX", %{id: 1, name: "Game"})
+```
+
+## Manually add howlongtobeat times
+
+```elixir
+Skaro.Playthrough.load_by_id("XXX", %{id: 1, name: "Game"})
+```
